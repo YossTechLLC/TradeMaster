@@ -1,0 +1,6 @@
+# Version ceilings needed for the pinned legacy stack (Python 3.9, torch 1.12.1, ray 1.13, tf 2.11, mmcv 1.7.1).
+# Usage: pip install -r requirements.txt -c constraints.txt
+numpy<1.24        # ray 1.13 uses np.bool (removed in numpy 1.24)
+protobuf<3.20     # tensorflow 2.11 / ray 1.13
+spacy<3.8         # spacy 3.8.x sdists need thinc builds that require Python >=3.10
+yapf<=0.40.1      # mmcv 1.7.1 calls FormatCode(verify=...), removed in newer yapf

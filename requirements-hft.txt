@@ -1,0 +1,44 @@
+# Shared environment for the HFT / data-generation extensions:
+#   EarnHFT/  MacroHFT/  Market-GAN/
+# These codebases target Python 3.10 + torch 2.0 (see each folder's upstream
+# requirements.txt / AAAI_MarketGAN.yml), so they live in a separate venv from the
+# core TradeMaster stack (.venv: Python 3.9 + torch 1.12).
+#
+# Setup (from the TradeMaster root):
+#   uv venv --python 3.10 --seed .venv-hft
+#   .venv-hft/bin/python -m pip install "pip<24.1" "setuptools==65.5.0" "wheel<0.40"   # gym 0.21 sdist needs these
+#   .venv-hft/bin/python -m pip install -r requirements-hft.txt
+--extra-index-url https://download.pytorch.org/whl/cu118
+
+# Anchors (pinned to match upstream)
+torch==2.0.1
+torchvision==0.15.2
+numpy==1.24.3
+pandas==1.5.3
+gym==0.21.0                 # EarnHFT pins 0.21; MacroHFT only subclasses gym.Env
+mmcv==1.7.1                 # Market-GAN (config handling)
+yapf<=0.40.1                # mmcv 1.7.1 calls FormatCode(verify=...), removed in newer yapf
+opencv-python<4.12          # pulled by mmcv; 4.12+ requires numpy 2
+
+# Scientific stack (ranges compatible with all three upstream pins)
+scipy>=1.10,<1.12
+scikit-learn==1.2.2         # tslearn 0.5.3.2 relies on sklearn private APIs removed in 1.3
+statsmodels==0.14.0
+tslearn==0.5.3.2
+fastdtw==0.3.4
+dtaidistance==2.3.10
+joblib
+matplotlib>=3.7,<3.8
+plotly
+prettytable
+PyYAML
+tqdm
+pyarrow                     # pandas feather I/O (EarnHFT / MacroHFT data files)
+tensorboard                 # torch.utils.tensorboard (MacroHFT, EarnHFT)
+
+# Market-GAN extras
+einops==0.6.1
+torchsummary==1.5.1
+iopath
+psutil
+yfinance

@@ -42,6 +42,7 @@ TradeMaster is a first-of-its kind, best-in-class __open-source platform__ for _
   - [Outline](#outline)
   - [Overview](#overview)
   - [Installation](#installation)
+  - [HFT \& Market Generation Extensions](#hft--market-generation-extensions)
   - [Tutorial](#tutorial)
   - [Useful Script](#useful-script)
   - [TradeMaster Sandbox](#trademaster-sandbox)
@@ -68,6 +69,22 @@ __TradeMaster__ is composed of 6 key modules: 1) multi-modality market data of d
 Here are the installation tutorials for different operating systems and docker:
 - [Installation on Linux/Windows/MacOS](https://github.com/TradeMaster-NTU/TradeMaster/tree/1.0.0/installation/requirements.md)
 - [Installation with Docker](https://github.com/TradeMaster-NTU/TradeMaster/tree/1.0.0/installation/docker.md)
+
+## HFT & Market Generation Extensions
+EarnHFT, MacroHFT and Market-GAN are vendored as self-contained projects at the repository root. They target Python 3.10 + PyTorch 2.0, so they share a separate environment (`.venv-hft`, from `requirements-hft.txt`) instead of the core TradeMaster one.
+
+| Folder | Paper | What it does | Entry point |
+| :----: | :---: | :----------- | :---------: |
+| [`EarnHFT/`](EarnHFT/TRADEMASTER.md) | EarnHFT (AAAI 2024) | Three-stage hierarchical RL for second-level crypto HFT: Q-teacher DDQN, a pool of trend-specialised agents, and a minute-level router | `EarnHFT/run.sh` |
+| [`MacroHFT/`](MacroHFT/TRADEMASTER.md) | MacroHFT (KDD 2024) | Minute-level crypto HFT: trend/volatility sub-agents with conditional adapters, mixed by a memory-augmented hyper-agent | `MacroHFT/run.sh` |
+| [`Market-GAN/`](Market-GAN/TRADEMASTER.md) | Market-GAN (AAAI 2024) | Context-controllable financial time-series generation (dynamics, ticker, history) for data augmentation | `Market-GAN/run.sh` |
+
+```bash
+uv venv --python 3.10 --seed .venv-hft
+.venv-hft/bin/python -m pip install "pip<24.1" "setuptools==65.5.0" "wheel<0.40"
+.venv-hft/bin/python -m pip install -r requirements-hft.txt
+MacroHFT/run.sh help      # each launcher lists its pipeline stages
+```
 
 ## Tutorial
 We provide tutorials covering core features of TradeMaster for users to get start with.

@@ -22,7 +22,7 @@ tensorflow==2.11.0
 packaging
 kaleido==0.1.0
 h5py
-pydantic==1.10.2
+pydantic==1.10.26
 jupyter
 celery
 pika

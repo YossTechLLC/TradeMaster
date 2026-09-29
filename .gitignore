@@ -1,5 +1,61 @@
-**/__pycac.pyc
-*.idea
+# Byte-compiled / optimized files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments / local env config
+.venv/
+.venv-*/
+/venv/
+/env/
+.env
+.env.*
+
+# Packaging / build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+pip-wheel-metadata/
+
+# Test / coverage / tooling caches
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.hypothesis/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDEs / editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+*:Zone.Identifier
+
+# Experiment outputs (training runs write here via cfg.work_dir)
+work_dir/
+ray_results/
+wandb/
+mlruns/
+lightning_logs/
+*.log
+
+# Data synthesis (TimeGAN) outputs
 /data_synthesis/TimeGAN/data/
 /data_synthesis/TimeGAN/export/
 /data_synthesis/TimeGAN/fig/
@@ -8,6 +64,25 @@
 /data_synthesis/TimeGAN/log/
 /data_synthesis/TimeGAN/style_discriminator/
 /data_synthesis/TimeGAN/training_log/
-/data_synthesis/TimeGAN/.ipynb_checkpoints/
 /data_synthesis/TimeGAN/metrics/.ipynb_checkpoints/
 /data_synthesis/timegan-pytorch/run.sh
+
+# --- HFT / generation extensions: generated data, checkpoints and logs ---
+# EarnHFT (downloaded + preprocessed data, training results)
+/EarnHFT/data_preprocess/download_from_tardis/
+/EarnHFT/data_preprocess/preprocess/concat_clean/
+/EarnHFT/data_preprocess/preprocess/create_features/
+/EarnHFT/data_preprocess/preprocess/merge/
+/EarnHFT/data_preprocess/ic_analysis/feature_analysis/
+/EarnHFT/EarnHFT_Algorithm/data/*/
+/EarnHFT/EarnHFT_Algorithm/result_risk/
+/EarnHFT/EarnHFT_Algorithm/log/
+# MacroHFT (per-run training dirs; the shipped result/low_level/*/best_model/ stays tracked)
+/MacroHFT/result/low_level/*/slope/
+/MacroHFT/result/low_level/*/vol/
+# Market-GAN (checkpoints, MDM output, generated data)
+/Market-GAN/output/
+/Market-GAN/logs/
+/Market-GAN/data/DJI/DJI_50/
+/Market-GAN/downstream_tasks/data/downstream_tasks/
+/Market-GAN/downstream_tasks/output/

@@ -1,0 +1,55 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/bin/python *)",
+      "Bash(.venv-hft/bin/python *)",
+      "Bash(/home/perc/TradeMaster/.venv/bin/python *)",
+      "Bash(/home/perc/TradeMaster/.venv-hft/bin/python *)",
+      "Bash(uv venv *)",
+      "Bash(uv pip *)",
+
+      "Bash(EarnHFT/run.sh *)",
+      "Bash(MacroHFT/run.sh *)",
+      "Bash(Market-GAN/run.sh *)",
+      "Bash(./run.sh *)",
+
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git ls-files *)",
+      "Bash(git check-ignore *)",
+      "Bash(git add -n *)",
+
+      "Bash(nvidia-smi *)",
+      "Bash(lscpu *)",
+      "Bash(tmux *)",
+
+      "Bash(curl * https://data.binance.vision/*)",
+      "Bash(wget * https://data.binance.vision/*)",
+      "Bash(curl * https://api.binance.com/*)",
+      "Bash(curl * https://datasets.tardis.dev/*)",
+      "WebFetch(domain:data.binance.vision)",
+      "WebFetch(domain:api.binance.com)",
+      "WebFetch(domain:docs.tardis.dev)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+
+      "Bash(ssh chad-box *)",
+      "Bash(ssh -o * chad-box *)",
+      "Bash(rsync * chad-box:/home/chad/TradeMaster/*)",
+      "Bash(rsync * chad-box:/home/chad/TradeMaster/* *)",
+      "Bash(scp * chad-box:/home/chad/TradeMaster/*)",
+      "Bash(scp chad-box:/home/chad/TradeMaster/* *)"
+    ],
+    "deny": [
+      "Bash(ssh chad-box *SIMONS*)",
+      "Bash(ssh chad-box *simons*)",
+      "Bash(ssh chad-box *kill*)",
+      "Bash(ssh chad-box *reboot*)",
+      "Bash(ssh chad-box *shutdown*)",
+      "Bash(rsync *--delete* chad-box:*)",
+      "Bash(git push *)"
+    ]
+  }
+}
