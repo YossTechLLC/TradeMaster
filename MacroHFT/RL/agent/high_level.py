@@ -11,6 +11,7 @@ import copy
 import sys
 import random
 import argparse
+import dataclasses  # [TradeMaster]
 
 import torch
 torch.set_num_threads(int(_THREADS))  # [TradeMaster]
@@ -32,6 +33,8 @@ from MacroHFT.env.high_level_env import Testing_Env, Training_Env
 from MacroHFT.RL.util.utili import get_ada, get_epsilon, LinearDecaySchedule, feature_lists
 from MacroHFT.RL.util.replay_buffer import ReplayBuffer_High
 from MacroHFT.RL.util.memory import episodicmemory
+from MacroHFT.trading.config import add_trading_args, config_from_args  # [TradeMaster]
+from MacroHFT.trading.envs import make_env  # [TradeMaster]
 
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"  # [TradeMaster] was the typo F_ENABLE_ONEDNN_OPTS
 
@@ -64,6 +67,7 @@ parser.add_argument("--context_window",type=int,default=360,
                     help="window of the slope_<w>/vol_<w> context columns (decomposition.py MACRO_CONTEXT_WINDOW)")
 parser.add_argument("--memory_capacity",type=int,default=4320,
                     help="episodic memory size in steps (also when re-encoding starts)")
+add_trading_args(parser)  # [TradeMaster]
 parser.add_argument("--subagent_path",type=str,default=None,
                     help="dir with {slope,vol}/{1,2,3}/best_model.pkl (default: result/low_level/<dataset>/best_model)")
 
@@ -83,11 +87,15 @@ class DQN(object):
     def __init__(self, args):  # 定义DQN的一系列属性
         self.seed = args.seed
         seed_torch(self.seed)
+        self.trading = config_from_args(args)  # [TradeMaster]
+        self.n_action = self.trading.n_action  # [TradeMaster]
+        self.result_key = args.dataset if self.trading.legacy else "{}@{}".format(args.dataset, self.trading.tag)  # [TradeMaster]
+        self.eval_initial_action = 0 if self.trading.legacy else self.trading.flat_action  # [TradeMaster]
         if torch.cuda.is_available():
             self.device = torch.device(args.device)
         else:
             self.device = torch.device("cpu")
-        self.result_path = os.path.join("./result/high_level", '{}'.format(args.dataset), args.exp)
+        self.result_path = os.path.join("./result/high_level", '{}'.format(self.result_key), args.exp)  # [TradeMaster]
         self.model_path = os.path.join(self.result_path,
                                        "seed_{}".format(self.seed))
         self.train_data_path = os.path.join(ROOT, "MacroHFT",
@@ -119,6 +127,8 @@ class DQN(object):
 
         if not os.path.exists(self.model_path):
             os.makedirs(self.model_path)
+        self.trading_dir = self.model_path  # [TradeMaster]
+        self.save_trading_config()  # [TradeMaster]
 
         # [TradeMaster] per-dataset input profile (data/<dataset>/feature_list/), else the upstream lists
         self.tech_indicator_list, self.tech_indicator_list_trend = feature_lists(args.dataset)
@@ -133,7 +143,6 @@ class DQN(object):
 
         self.transcation_cost = args.transcation_cost
         self.back_time_length = args.back_time_length
-        self.n_action = 2
         self.n_state_1 = len(self.tech_indicator_list)
         self.n_state_2 = len(self.tech_indicator_list_trend)
         self.slope_1 = subagent(
@@ -149,7 +158,7 @@ class DQN(object):
         self.vol_3 = subagent(
             self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)        
         # [TradeMaster] sub-agents come from --subagent_path (default: this dataset's best_model dir)
-        subagent_path = args.subagent_path or os.path.join("./result/low_level", args.dataset, "best_model")
+        subagent_path = args.subagent_path or os.path.join("./result/low_level", self.result_key, "best_model")
         model_list_slope = [os.path.join(subagent_path, "slope", str(i), "best_model.pkl") for i in (1, 2, 3)]
         model_list_vol = [os.path.join(subagent_path, "vol", str(i), "best_model.pkl") for i in (1, 2, 3)]
         missing = [p for p in model_list_slope + model_list_vol if not os.path.exists(p)]
@@ -226,6 +235,13 @@ class DQN(object):
         
         return combined_q
 
+
+    def save_trading_config(self):  # [TradeMaster] venue (with provenance) + config, non-legacy modes only
+        if self.trading.legacy:
+            return
+        cfg = dataclasses.asdict(self.trading)
+        with open(os.path.join(self.trading_dir, "trading_config.yaml"), "w") as f:
+            yaml.safe_dump({"tag": self.trading.tag, "config": cfg}, f, sort_keys=False)
 
     def update(self, replay_buffer):
         batch, _, _ = replay_buffer.sample()
@@ -316,7 +332,7 @@ class DQN(object):
             action = torch.max(actions_value, 1)[1].data.cpu().numpy()
             action = action[0]
         else:
-            action_choice = [0,1]
+            action_choice = list(range(self.n_action))  # [TradeMaster]
             action = random.choice(action_choice)
         return action
 
@@ -377,16 +393,12 @@ class DQN(object):
             self.df = train_df
             
             
-            train_env = Training_Env(
-                    df=self.df,
-                    tech_indicator_list=self.tech_indicator_list,
-                    tech_indicator_list_trend=self.tech_indicator_list_trend,
-                    clf_list=self.clf_list,
+            train_env = make_env("train", "high", self.df, self.tech_indicator_list, self.tech_indicator_list_trend,
+                    self.trading, clf_list=self.clf_list,  # [TradeMaster]
                     transcation_cost=self.transcation_cost,
                     back_time_length=self.back_time_length,
                     max_holding_number=self.max_holding_number,
-                    initial_action=random.choices(range(self.n_action), k=1)[0],
-                    alpha = 0)
+                    initial_action=random.choices(range(self.n_action), k=1)[0])
             s, s2, s3, info = train_env.reset()
             episode_reward_sum = 0
             
@@ -534,15 +546,12 @@ class DQN(object):
         self.df = self.read_split(
             os.path.join(self.val_data_path, "val.feather"))  # [TradeMaster]
         
-        val_env = Testing_Env(
-                df=self.df,
-                tech_indicator_list=self.tech_indicator_list,
-                tech_indicator_list_trend=self.tech_indicator_list_trend,
-                clf_list=self.clf_list,
+        val_env = make_env("test", "high", self.df, self.tech_indicator_list, self.tech_indicator_list_trend,
+                self.trading, clf_list=self.clf_list,  # [TradeMaster]
                 transcation_cost=self.transcation_cost,
                 back_time_length=self.back_time_length,
                 max_holding_number=self.max_holding_number,
-                initial_action=0)
+                initial_action=self.eval_initial_action)
         s, s2, s3, info = val_env.reset()
         done = False
         action_list_episode = []
@@ -567,6 +576,8 @@ class DQN(object):
         required_money_list = np.array(required_money_list)
         commission_fee_list = np.array(commission_fee_list)
         np.save(os.path.join(save_path, "action_val.npy"), action_list)
+        if not self.trading.legacy:  # [TradeMaster]
+            np.savez(os.path.join(save_path, "trading_log_val.npz"), **val_env.trading_log)
         np.save(os.path.join(save_path, "reward_val.npy"), reward_list)
         np.save(os.path.join(save_path, "final_balance_val.npy"),
             final_balance_list)
@@ -596,15 +607,12 @@ class DQN(object):
         self.df = self.read_split(
             os.path.join(self.test_data_path, "test.feather"))  # [TradeMaster]
         
-        test_env = Testing_Env(
-                df=self.df,
-                tech_indicator_list=self.tech_indicator_list,
-                tech_indicator_list_trend=self.tech_indicator_list_trend,
-                clf_list=self.clf_list,
+        test_env = make_env("test", "high", self.df, self.tech_indicator_list, self.tech_indicator_list_trend,
+                self.trading, clf_list=self.clf_list,  # [TradeMaster]
                 transcation_cost=self.transcation_cost,
                 back_time_length=self.back_time_length,
                 max_holding_number=self.max_holding_number,
-                initial_action=0)
+                initial_action=self.eval_initial_action)
         s, s2, s3, info = test_env.reset()
         done = False
         action_list_episode = []
@@ -630,6 +638,8 @@ class DQN(object):
         required_money_list = np.array(required_money_list)
         commission_fee_list = np.array(commission_fee_list)
         np.save(os.path.join(save_path, "action.npy"), action_list)
+        if not self.trading.legacy:  # [TradeMaster]
+            np.savez(os.path.join(save_path, "trading_log.npz"), **test_env.trading_log)
         np.save(os.path.join(save_path, "reward.npy"), reward_list)
         np.save(os.path.join(save_path, "final_balance.npy"),
             final_balance_list)

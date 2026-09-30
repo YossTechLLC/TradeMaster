@@ -101,3 +101,6 @@ Measured on 2 epochs × 6000 bars of the hyper-agent: **212 s → 29 s** (laptop
 - The market-type labels use quantiles `[0, .05, .35, .65, .95, 1]`, i.e. five classes, not terciles. The sub-agents train on classes 1-3, so the most extreme 5% of train chunks at each end are unused. Validation and test fold 0→1 and 4→3.
 - Execution is at the previous bar's close with zero latency and zero slippage.
 - Validation and test run one episode from a flat position.
+
+## Trading layer (long/short, venue costs, turnover penalty)
+An optional layer in `trading/` adds a short/flat/long mode next to the upstream long-only environment, a per-venue cost model (fees, funding, leverage 3 < L < 10, liquidation; target Kraken US perp) and a training-only turnover penalty. It is off by default (`--trade_mode legacy`, golden-identical). The upstream files change only where the agents select an environment and their result paths (`low_level.py`, `high_level.py`: `add_trading_args`, `make_env`, `n_action`, result key `<dataset>@<mode-venue-L-tp>`; `plan_runs.sh`: `TRADING_ARGS`/`TRADING_TAG`), all marked `# [TradeMaster]`. Usage, flags, assumptions and unverified venue figures: `trading/README.md`; contract: `docs/trading_mvp_spec.md`.

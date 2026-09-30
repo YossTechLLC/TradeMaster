@@ -11,6 +11,7 @@ import copy
 import sys
 import random
 import argparse
+import dataclasses  # [TradeMaster]
 
 import torch
 torch.set_num_threads(int(_THREADS))  # [TradeMaster]
@@ -31,6 +32,8 @@ from MacroHFT.model.net import *
 from MacroHFT.env.low_level_env import Testing_Env, Training_Env
 from MacroHFT.RL.util.utili import get_ada, get_epsilon, LinearDecaySchedule, feature_lists
 from MacroHFT.RL.util.replay_buffer import ReplayBuffer
+from MacroHFT.trading.config import add_trading_args, config_from_args  # [TradeMaster]
+from MacroHFT.trading.envs import make_env  # [TradeMaster]
 
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"  # [TradeMaster] was the typo F_ENABLE_ONEDNN_OPTS
 
@@ -56,6 +59,7 @@ parser.add_argument("--label",type=str,default="label_1")
 parser.add_argument("--clf",type=str,default="slope")
 parser.add_argument("--alpha",type=float,default="0")
 parser.add_argument("--device",type=str,default="cuda:0")
+add_trading_args(parser)  # [TradeMaster]
 
 
 def seed_torch(seed):
@@ -77,12 +81,15 @@ class DQN(object):
     def __init__(self, args):  # 定义DQN的一系列属性
         self.seed = args.seed
         seed_torch(self.seed)
+        self.trading = config_from_args(args)  # [TradeMaster]
+        self.n_action = self.trading.n_action  # [TradeMaster]
+        self.result_key = args.dataset if self.trading.legacy else "{}@{}".format(args.dataset, self.trading.tag)  # [TradeMaster]
         if torch.cuda.is_available():
             self.device = torch.device(args.device)
         else:
             self.device = torch.device("cpu")
         self.result_path = os.path.join("./result/low_level", 
-                                        '{}'.format(args.dataset), '{}'.format(args.clf), str(int(args.alpha)), args.label)
+                                        '{}'.format(self.result_key), '{}'.format(args.clf), str(int(args.alpha)), args.label)  # [TradeMaster] result_key
         self.label = int(args.label.split('_')[1])
         self.model_path = os.path.join(self.result_path,
                                        "seed_{}".format(self.seed))
@@ -131,13 +138,14 @@ class DQN(object):
 
         if not os.path.exists(self.model_path):
             os.makedirs(self.model_path)
+        self.trading_dir = self.model_path  # [TradeMaster]
+        self.save_trading_config()  # [TradeMaster]
 
         # [TradeMaster] per-dataset input profile (data/<dataset>/feature_list/), else the upstream lists
         self.tech_indicator_list, self.tech_indicator_list_trend = feature_lists(args.dataset)
 
         self.transcation_cost = args.transcation_cost
         self.back_time_length = args.back_time_length
-        self.n_action = 2
         self.n_state_1 = len(self.tech_indicator_list)
         self.n_state_2 = len(self.tech_indicator_list_trend)
         self.eval_net, self.target_net = subagent(
@@ -162,6 +170,13 @@ class DQN(object):
         self.epsilon = args.epsilon_start
         self.args = args  # [TradeMaster] methods used the module-global `args` (only worked as __main__)
         self.alpha = args.alpha
+
+    def save_trading_config(self):  # [TradeMaster] venue (with provenance) + config, non-legacy modes only
+        if self.trading.legacy:
+            return
+        cfg = dataclasses.asdict(self.trading)
+        with open(os.path.join(self.trading_dir, "trading_config.yaml"), "w") as f:
+            yaml.safe_dump({"tag": self.trading.tag, "config": cfg}, f, sort_keys=False)
 
     def update(self, replay_buffer):
         self.eval_net.train()
@@ -214,7 +229,7 @@ class DQN(object):
             action = torch.max(actions_value, 1)[1].data.cpu().numpy()
             action = action[0]
         else:
-            action_choice = [0,1]
+            action_choice = list(range(self.n_action))  # [TradeMaster]
             action = random.choice(action_choice)
         return action
 
@@ -256,15 +271,12 @@ class DQN(object):
                     os.path.join(self.train_data_path, "df_{}.feather".format(df_index)))
                 self.eval_net.eval()
                                
-                train_env = Training_Env(
-                        df=self.df,
-                        tech_indicator_list=self.tech_indicator_list,
-                        tech_indicator_list_trend=self.tech_indicator_list_trend,
+                train_env = make_env("train", "low", self.df, self.tech_indicator_list, self.tech_indicator_list_trend,
+                        self.trading,  # [TradeMaster] legacy mode builds the upstream Training_Env with the same arguments
                         transcation_cost=self.transcation_cost,
                         back_time_length=self.back_time_length,
                         max_holding_number=self.max_holding_number,
-                        initial_action=random_position_list[i],
-                        alpha = 0)
+                        initial_action=random_position_list[i])
                 s, s2, info = train_env.reset()
                 episode_reward_sum = 0
                 
@@ -367,9 +379,12 @@ class DQN(object):
             val_path = os.path.join(epoch_path, "val")
             if not os.path.exists(val_path):
                     os.makedirs(val_path)
-            return_rate_0 = self.val_cluster(epoch_path, val_path, 0)
-            return_rate_1 = self.val_cluster(epoch_path, val_path, 1)
-            return_rate_eval = (return_rate_0 + return_rate_1) / 2
+            if self.trading.legacy:
+                return_rate_0 = self.val_cluster(epoch_path, val_path, 0)
+                return_rate_1 = self.val_cluster(epoch_path, val_path, 1)
+                return_rate_eval = (return_rate_0 + return_rate_1) / 2
+            else:  # [TradeMaster] average over every initial position
+                return_rate_eval = np.mean([self.val_cluster(epoch_path, val_path, a0) for a0 in range(self.n_action)])
             if best_model is None and not np.isfinite(return_rate_eval):
                 # [TradeMaster] no validation chunk carries this label (the mean over zero chunks is nan):
                 # nan never beats the best score, so best_model stayed None and None was saved as the checkpoint
@@ -386,7 +401,7 @@ class DQN(object):
         # [TradeMaster] save where RL/agent/high_level.py loads sub-agents from:
         #   result/low_level/<dataset>/best_model/<clf>/<label#>/best_model.pkl
         best_model_dir = os.path.join("./result/low_level", 
-                                        '{}'.format(self.dataset), 'best_model', '{}'.format(self.clf), str(self.label))
+                                        '{}'.format(self.result_key), 'best_model', '{}'.format(self.clf), str(self.label))
         os.makedirs(best_model_dir, exist_ok=True)
         best_model_path = os.path.join(best_model_dir, 'best_model.pkl')
         torch.save(best_model, best_model_path)  # [TradeMaster] best_model is already a state_dict
@@ -403,15 +418,14 @@ class DQN(object):
         final_balance_list = []
         required_money_list = []
         commission_fee_list = []
+        trading_logs = {}  # [TradeMaster]
         for i in range(df_number):
             print("validating on df", df_list[i])
             self.df = pd.read_feather(
                 os.path.join(self.val_data_path, "df_{}.feather".format(df_list[i])))
             
-            val_env = Testing_Env(
-                    df=self.df,
-                    tech_indicator_list=self.tech_indicator_list,
-                    tech_indicator_list_trend=self.tech_indicator_list_trend,
+            val_env = make_env("test", "low", self.df, self.tech_indicator_list, self.tech_indicator_list_trend,
+                    self.trading,  # [TradeMaster]
                     transcation_cost=self.transcation_cost,
                     back_time_length=self.back_time_length,
                     max_holding_number=self.max_holding_number,
@@ -435,12 +449,16 @@ class DQN(object):
             final_balance_list.append(final_balance)
             required_money_list.append(required_money)
             commission_fee_list.append(commission_fee)
+            if not self.trading.legacy:  # [TradeMaster]
+                trading_logs.update({"df{}_{}".format(df_list[i], k): v for k, v in val_env.trading_log.items()})
         action_list = np.array(action_list)
         reward_list = np.array(reward_list)
         final_balance_list = np.array(final_balance_list)
         required_money_list = np.array(required_money_list)
         commission_fee_list = np.array(commission_fee_list)
         np.save(os.path.join(save_path, "action_val_{}.npy".format(initial_action)), action_list)
+        if trading_logs:  # [TradeMaster]
+            np.savez(os.path.join(save_path, "trading_log_val_{}.npz".format(initial_action)), **trading_logs)
         np.save(os.path.join(save_path, "reward_val_{}.npy".format(initial_action)), reward_list)
         np.save(os.path.join(save_path, "final_balance_val_{}.npy".format(initial_action)),
             final_balance_list)
