@@ -31,6 +31,10 @@ usage() {
   cat <<EOF
 MacroHFT pipeline (run from anywhere; stages in order):
 
+  build PROFILE TIMEFRAME        Step 0 (input profiles): download Binance spot klines, compute the profile's
+                                  features, scale on train -> data/<SYMBOL>_<TIMEFRAME>_<PROFILE>/.
+                                  'build --all' builds every profiles/*.yaml x timeframe. Use that name as DATASET.
+  admit                          Admission test of \$DATASET's features on train (profiles/admit.py)
   decompose                      Step 1: chunk data/\$DATASET/df_{train,val,test}.feather and label chunks
                                   by trend (slope) and volatility -> data/\$DATASET/{train,val,test,whole}/
   train-low [CLF LABEL ALPHA]    Step 2: phase I sub-agents (DDQN + conditional adapter). With no args,
@@ -53,7 +57,10 @@ EOF
 run() { # run <log> <script> [args...]
   local log=$1; shift
   if [[ -n ${EMIT_JOBS:-} ]]; then  # print "<job id>\t<command>" for box/runjobs.sh instead of running
-    printf '%s\t' "$(echo "${log%.log}" | tr '/' '_')"; printf 'cd %q && ' "$HERE"; printf '%q ' "$PY" -u "$@"; echo
+    printf '%s\t' "$(echo "${log%.log}" | tr '/' '_')"; printf 'cd %q && ' "$HERE"
+    # the dataset's run.env settings must reach decompose when the job runs later
+    [[ -n ${MACRO_CHUNK_SIZE:-} ]] && printf 'MACRO_CHUNK_SIZE=%q MACRO_CONTEXT_WINDOW=%q ' "$MACRO_CHUNK_SIZE" "$MACRO_CONTEXT_WINDOW"
+    printf '%q ' "$PY" -u "$@"; echo
     return
   fi
   mkdir -p "$HERE/$(dirname "$log")"
@@ -68,7 +75,23 @@ while [[ $# -gt 0 ]]; do
   POS+=("$1"); shift
 done
 
+# Per-dataset run settings written by profiles/build.py (chunk size, context window, memory size)
+if [[ -f $HERE/data/$DATASET/run.env ]]; then
+  set -a; source "$HERE/data/$DATASET/run.env"; set +a
+fi
+read -r -a HIGH_ARGS <<<"${MACRO_HIGH_ARGS:-}"
+
 case "$stage" in
+  build)
+    if [[ ${POS[0]:-} == --all ]]; then run "logs/build.log" profiles/build.py --all "${EXTRA[@]}"
+    else
+      [[ ${#POS[@]} -eq 2 ]] || { echo "build takes PROFILE TIMEFRAME, or --all" >&2; exit 2; }
+      run "logs/build_${POS[0]}_${POS[1]}.log" profiles/build.py --profile "${POS[0]}" --timeframe "${POS[1]}" "${EXTRA[@]}"
+    fi ;;
+
+  admit)
+    run "logs/admit_$DATASET.log" profiles/admit.py --dataset "$DATASET" "${EXTRA[@]}" ;;
+
   decompose)
     for f in df_train df_val df_test; do
       [[ -f $HERE/data/$DATASET/$f.feather ]] || { echo "missing data/$DATASET/$f.feather - see readme.md (Google Drive)" >&2; exit 1; }
@@ -88,11 +111,11 @@ case "$stage" in
     done ;;
 
   train-high)
-    for f in train val test; do
-      [[ -f $HERE/data/$DATASET/whole/$f.feather ]] || { echo "missing data/$DATASET/whole/$f.feather - run './run.sh decompose' first" >&2; exit 1; }
+    for f in train val test; do  # (not checked when only listing jobs: decompose runs in an earlier stage)
+      [[ -n ${EMIT_JOBS:-} || -f $HERE/data/$DATASET/whole/$f.feather ]] || { echo "missing data/$DATASET/whole/$f.feather - run './run.sh decompose' first" >&2; exit 1; }
     done
     run "logs/high_level/$DATASET.log" RL/agent/high_level.py \
-      --dataset "$DATASET" --device "$DEVICE" "${EXTRA[@]}" ;;
+      --dataset "$DATASET" --device "$DEVICE" "${HIGH_ARGS[@]}" "${EXTRA[@]}" ;;
 
   help|-h|--help) usage ;;
   *) echo "unknown stage: $stage" >&2; usage; exit 2 ;;

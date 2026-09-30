@@ -1,0 +1,19 @@
+# [TradeMaster] P2: XT10, split by persistence tau: fast coordinates (tau < 9 bars) are the per-bar state,
+# slow ones (tau >= 9 bars, and the calendar) condition the sub-agents as the trend group.
+# Windows are in bars as specified (sigma: EWMA half-life 89, 987-bar window; "1d" = 96 bars).
+# Defaults chosen for open points: seasonal slot = hour of week (168), "next 13 slots" = the next 13 bars.
+name: xt10
+description: XT10 state block, tau-split (5 single + 5 trend)
+strict: true
+single:
+  - {id: ret_0_1_sigma, fn: ret_sigma,    args: {a: 0, b: 1},  scale: z}
+  - {id: ret_1_3_sigma, fn: ret_sigma,    args: {a: 1, b: 3},  scale: z}
+  - {id: ret_3_8_sigma, fn: ret_sigma,    args: {a: 3, b: 8},  scale: z}
+  - {id: efficiency_13, fn: efficiency,   args: {w: 13},       scale: none}
+  - {id: mid_position,  fn: mid_position,                      scale: none}
+trend:
+  - {id: ret_8_21_sigma,           fn: ret_sigma,               args: {a: 8, b: 21},        scale: z}
+  - {id: range_over_mean_range_1d, fn: range_over_mean_range,   args: {w: 96},              scale: log+z}
+  - {id: rv8_over_sigma,           fn: rv_over_sigma,           args: {w: 8},               scale: z}
+  - {id: trade_size_rel_1d,        fn: trade_size_rel,          args: {w: 96},              scale: z}
+  - {id: seasonal_activity_ahead,  fn: seasonal_activity_ahead, args: {ahead: 13},          scale: z}

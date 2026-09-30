@@ -102,7 +102,9 @@ Rules for working in them:
 ## Remote compute
 
 The BOX (ssh alias `chad-box`, repo in `/home/chad/TradeMaster` only) runs MacroHFT and EarnHFT on CPU. It has a CPU-only `.venv-hft` (`requirements-hft-cpu.txt`). Scaling comes from many 1-thread processes, not threads. `box/README.md` has the sync command, the job runner and per-workload sizes. There is no `init_box.sh`.
-- Run parallel work through `box/runjobs.sh`. It wraps each job in `systemd-run --user --scope -p MemoryMax=…` and enforces the rules below.
-- Keep total RAM at or below 48 GB, and keep at least 20 GiB of disk free.
+- The BOX is shared with another agent running SIMONS compute. **Our allocation is 16 CPUs / 24 GB RAM**; theirs is the same. Never exceed ours.
+- Run parallel work through `box/runjobs.sh`. It runs every job inside the `tmhft.slice` systemd slice, capped at 24 GB and 16 CPUs as a whole, with a MemoryMax per job. It refuses plans over the allocation, or when the host lacks the memory right now. Check with `box/runjobs.sh --check -j N -m MEM`.
+- Keep at least 20 GiB of disk free.
+- Start compute on the BOX only when the user says so.
 - Never touch the owner's files or processes (`SIMONS_v3`, other GPU jobs).
 - Copying files to the host needs the user's explicit approval. rsync never uses `--delete`.

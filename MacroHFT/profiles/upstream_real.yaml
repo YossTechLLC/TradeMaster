@@ -1,0 +1,29 @@
+# [TradeMaster] P0: the upstream default stack minus every order-book-derived input (control).
+# Dropped (need a paid L2 book): bid/ask1..5_size_n, wap_1, wap_2, wap_balance, buy_spread, sell_spread,
+# price_spread, log_return_{bid1,bid2,ask1,ask2,wap_1}_price and the 6 book-price/spread trends.
+# The five book-price returns are replaced by the one real close return. buy_vwap/sell_vwap stay raw price
+# levels as upstream had them (non-stationary on purpose: this is the control), so the build warns.
+name: upstream_real
+description: upstream default inputs that exist without an order book (16 single + 3 trend)
+strict: false
+single:
+  - {id: volume,           fn: volume,           scale: log1p+z}
+  - {id: buy_volume,       fn: buy_volume,       scale: log1p+z}
+  - {id: sell_volume,      fn: sell_volume,      scale: log1p+z}
+  - {id: volume_imbalance, fn: volume_imbalance, scale: none}
+  - {id: sell_vwap,        fn: sell_vwap,        scale: z}
+  - {id: buy_vwap,         fn: buy_vwap,         scale: z}
+  - {id: log_return,       fn: log_ret,          scale: z}
+  - {id: kmid,  fn: candle, args: {kind: kmid},  scale: z}
+  - {id: klen,  fn: candle, args: {kind: klen},  scale: log1p+z}
+  - {id: kmid2, fn: candle, args: {kind: kmid2}, scale: none}
+  - {id: kup,   fn: candle, args: {kind: kup},   scale: z}
+  - {id: kup2,  fn: candle, args: {kind: kup2},  scale: none}
+  - {id: klow,  fn: candle, args: {kind: klow},  scale: z}
+  - {id: klow2, fn: candle, args: {kind: klow2}, scale: none}
+  - {id: ksft,  fn: candle, args: {kind: ksft},  scale: z}
+  - {id: ksft2, fn: candle, args: {kind: ksft2}, scale: none}
+trend:
+  - {id: buy_vwap_trend_60,  fn: trend_diff, args: {base: buy_vwap,  w: 60}, scale: z}
+  - {id: sell_vwap_trend_60, fn: trend_diff, args: {base: sell_vwap, w: 60}, scale: z}
+  - {id: volume_trend_60,    fn: trend_diff, args: {base: volume,    w: 60}, scale: z}

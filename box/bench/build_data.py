@@ -40,7 +40,8 @@ def klines(interval, start, days):
         months = sorted({(start + dt.timedelta(d)).replace(day=1) for d in range(days)})
         parts = [fetch(interval, m) for m in months]
     df = pd.concat(parts, ignore_index=True)
-    df["timestamp"] = pd.to_datetime(df.open_time, unit="ms")
+    t = df.open_time.astype("int64")  # Binance spot archives switched from ms to microseconds on 2025-01-01
+    df["timestamp"] = pd.to_datetime(np.where(t > 10**14, t // 1000, t), unit="ms")
     df = df[(df.timestamp >= pd.Timestamp(start)) & (df.timestamp < pd.Timestamp(end))]
     return df.reset_index(drop=True)
 

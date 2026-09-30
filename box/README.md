@@ -7,7 +7,7 @@ process gains almost nothing from extra threads, but many 1-thread processes sca
 here is built around that.
 
 **Host rules** (see the root `CLAUDE.md`):
-- Stay at or below 48 GB of RAM in total, and keep at least 20 GiB of disk free.
+- Stay within our allocation of 16 CPUs / 24 GB RAM (the host is shared with the SIMONS agent), and keep at least 20 GiB of disk free.
 - Never touch the owner's files or processes.
 - Copying files to the host needs the user's approval.
 
@@ -15,27 +15,36 @@ here is built around that.
 
 ```bash
 EMIT_JOBS=1 EarnHFT/run.sh valid-low ETHUSDT > jobs.tsv    # any stage of either run.sh: list its jobs
-box/runjobs.sh -j 16 -m 1500M jobs.tsv                      # run them, 16 at a time, 1.5 GB cap each
+box/runjobs.sh -j 16 -m 1500M jobs.tsv                      # run them, 16 at a time, 1.5 GB cap each (24 GB)
 ```
 
 - Each job runs in its own `systemd-run --user --scope -p MemoryMax=… -p MemorySwapMax=0`, so a runaway job is killed alone.
 - Each job gets `TM_THREADS`, `OMP_NUM_THREADS` and `MKL_NUM_THREADS` set to `-t` (default 1).
 - Logs go to `<jobfile>_logs/<job id>.log`, with `summary.tsv` holding the id, exit code and seconds.
 - A failed job does not stop the others. The script exits 1 at the end if any job failed.
-- It refuses to start if `-j × -m` exceeds `BOX_MEM_BUDGET` (48G) or less than 20 GiB of disk is free.
+- It refuses to start if the plan exceeds our 16 CPU / 24 GB allocation, the host lacks that memory right now, or less than 20 GiB of disk is free (see below).
 
-Suggested sizes, measured on the BOX. It has **16 physical cores**, and SMT siblings add nothing: 16 one-thread
-hyper-agent jobs give about 12× the throughput of one, and 32 give no more than 16. Keep `-j` at 16 or below for CPU-bound work
-(fewer if the owner is busy: check `uptime`).
+**Shared host: our allocation is 16 CPUs / 24 GB.** Another agent runs SIMONS compute on the BOX under its own
+16 CPUs / 24 GB. `runjobs.sh` runs every job of ours inside one systemd slice (`tmhft.slice`) that the kernel caps
+at 24 GB and 16 CPUs in total, even across several `runjobs` invocations at once. It refuses plans where
+`-j × -m` > 24G or `-j × -t` > 16, or where the host doesn't currently have the planned memory available.
+`box/runjobs.sh --check -j N -m MEM` runs only these checks.
 
-| Workload | Peak RSS (measured) | `-j` | `-m` |
-|---|---|---|---|
-| MacroHFT sub-agents (`train-low`) | ~0.4 GB | 6 (all at once) | 1500M |
-| MacroHFT hyper-agent (`train-high`), extra seeds/exps side by side | 0.5 GB | up to 16 | 1500M |
-| EarnHFT `train-low` (one job per beta or seed) | 0.5 GB + ~38 MB per sample until the 1e6 replay buffers fill (~70 samples): ~3.2 GB at the default 200 | 12 | 4G |
-| EarnHFT `train-high` (router) | 1.1 GB | 1 per seed | 2G |
-| EarnHFT `valid-low` / `test-high` | < 1 GB | 16 | 1500M |
-| EarnHFT `label` | < 1 GB | 1 | 4G |
+The BOX has **16 physical cores**, and SMT siblings add nothing: 16 one-thread hyper-agent jobs give about 12× the
+throughput of one, and 32 give no more than 16. Our 16 CPUs are therefore a quota, not pinned cores; expect lower
+per-job speed while the other agent is busy.
+
+Sizes within the 24 GB allocation (peak RSS measured on the BOX; the replay buffers grow as they fill):
+
+| Workload | Peak RSS | `-j` | `-m` | Total |
+|---|---|---|---|---|
+| MacroHFT `decompose` | < 1 GB | 8 | 2G | 16 GB |
+| MacroHFT sub-agents (`train-low`) | ~0.4 GB, up to ~1.2 GB with a full buffer | 16 | 1500M | 24 GB |
+| MacroHFT hyper-agent (`train-high`), seeds/exps side by side | 0.5 GB, ~1.4 GB with a full 1e6 buffer | 12 | 2G | 24 GB |
+| EarnHFT `train-low` | ~3.2 GB at the default 200 samples | 6 | 4G | 24 GB |
+| EarnHFT `train-high` (router) | 1.1 GB | 1 per seed | 2G | |
+| EarnHFT `valid-low` / `test-high` | < 1 GB | 16 | 1500M | 24 GB |
+| EarnHFT `label` | < 1 GB | 1 | 4G | |
 
 Sync code with rsync: send only the files git tracks, plus new ones it doesn't ignore, under the HFT paths
 (environments, data and results are git-ignored, so they never go). Never use `--delete`:
@@ -57,6 +66,7 @@ Pull results back with `rsync -az chad-box:/home/chad/TradeMaster/<project>/resu
 | `bench/tests/test_macro_memory.py` | The vectorised MacroHFT episodic-memory query equals the upstream loop, bit for bit. |
 | `bench/tests/test_q_tables.py` | The vectorised Q-teacher tables (both projects) equal the upstream loops, bit for bit. |
 | `bench/tests/test_macro_decomposition.py` | The dot-product rolling slope equals upstream `rolling().apply(...)` to float rounding. |
+| `bench/tests/test_profiles.py` | MacroHFT input profiles: every feature is causal (identical values when later bars are cut off), and every built dataset is finite, scaled and accepted by MacroHFT's env and networks. |
 | `bench/ts.py` | Prefixes stdin lines with a timestamp (used for the timing logs). |
 | `bench/logs/` | The original BOX benchmark logs, before any fixes. |
 

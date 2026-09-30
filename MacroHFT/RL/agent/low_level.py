@@ -29,7 +29,7 @@ sys.path.insert(0, ".")
 
 from MacroHFT.model.net import *
 from MacroHFT.env.low_level_env import Testing_Env, Training_Env
-from MacroHFT.RL.util.utili import get_ada, get_epsilon, LinearDecaySchedule
+from MacroHFT.RL.util.utili import get_ada, get_epsilon, LinearDecaySchedule, feature_lists
 from MacroHFT.RL.util.replay_buffer import ReplayBuffer
 
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"  # [TradeMaster] was the typo F_ENABLE_ONEDNN_OPTS
@@ -132,8 +132,8 @@ class DQN(object):
         if not os.path.exists(self.model_path):
             os.makedirs(self.model_path)
 
-        self.tech_indicator_list = np.load('./data/feature_list/single_features.npy', allow_pickle=True).tolist()
-        self.tech_indicator_list_trend = np.load('./data/feature_list/trend_features.npy', allow_pickle=True).tolist()
+        # [TradeMaster] per-dataset input profile (data/<dataset>/feature_list/), else the upstream lists
+        self.tech_indicator_list, self.tech_indicator_list_trend = feature_lists(args.dataset)
 
         self.transcation_cost = args.transcation_cost
         self.back_time_length = args.back_time_length

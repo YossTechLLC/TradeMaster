@@ -1,0 +1,25 @@
+# [TradeMaster] P1: 13 single + 4 trend features from spot klines only (docs/macrohft_inputs.md section 4).
+# Revised from the 14+4 proposal after the build's redundancy check: log_trade_count ~ log_quote_volume (rho 0.96)
+# -> log_avg_trade_size; buy_vwap_dev ~ sell_vwap_dev (0.98) ~ -ksft (0.96) -> one vwap_spread.
+name: kline17
+description: stationary, unit-free kline/trade-flow features (13 single + 4 trend)
+strict: true
+single:
+  - {id: log_return,       fn: log_ret,          scale: z}
+  - {id: log_quote_volume, fn: log_quote_volume, scale: z}
+  - {id: volume_imbalance, fn: volume_imbalance, scale: none}
+  - {id: log_avg_trade_size, fn: log_avg_trade_size, scale: z}
+  - {id: vwap_spread,   fn: vwap_spread,   scale: z}
+  - {id: klen,  fn: candle, args: {kind: klen},  scale: log1p+z}
+  - {id: kmid2, fn: candle, args: {kind: kmid2}, scale: none}
+  - {id: kup,   fn: candle, args: {kind: kup},   scale: z}
+  - {id: kup2,  fn: candle, args: {kind: kup2},  scale: none}
+  - {id: klow,  fn: candle, args: {kind: klow},  scale: z}
+  - {id: klow2, fn: candle, args: {kind: klow2}, scale: none}
+  - {id: ksft,  fn: candle, args: {kind: ksft},  scale: z}
+  - {id: ksft2, fn: candle, args: {kind: ksft2}, scale: none}
+trend:   # W = 16 bars at 15m (4 h), 24 bars at 1h (1 day)
+  - {id: ret_W,             fn: window_return,   args: {w: {15m: 16, 1h: 24}}, scale: z}
+  - {id: rv_W,              fn: realized_vol,    args: {w: {15m: 16, 1h: 24}}, scale: log+z}
+  - {id: volume_surprise_W, fn: volume_surprise, args: {w: {15m: 16, 1h: 24}}, scale: robust}   # zero-volume (outage) bars are extreme outliers
+  - {id: flow_W,            fn: flow,            args: {w: {15m: 16, 1h: 24}}, scale: z}

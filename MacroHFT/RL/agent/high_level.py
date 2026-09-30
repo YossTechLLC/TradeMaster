@@ -29,7 +29,7 @@ sys.path.insert(0, ".")
 
 from MacroHFT.model.net import *
 from MacroHFT.env.high_level_env import Testing_Env, Training_Env
-from MacroHFT.RL.util.utili import get_ada, get_epsilon, LinearDecaySchedule
+from MacroHFT.RL.util.utili import get_ada, get_epsilon, LinearDecaySchedule, feature_lists
 from MacroHFT.RL.util.replay_buffer import ReplayBuffer_High
 from MacroHFT.RL.util.memory import episodicmemory
 
@@ -120,8 +120,8 @@ class DQN(object):
         if not os.path.exists(self.model_path):
             os.makedirs(self.model_path)
 
-        self.tech_indicator_list = np.load('./data/feature_list/single_features.npy', allow_pickle=True).tolist()
-        self.tech_indicator_list_trend = np.load('./data/feature_list/trend_features.npy', allow_pickle=True).tolist()
+        # [TradeMaster] per-dataset input profile (data/<dataset>/feature_list/), else the upstream lists
+        self.tech_indicator_list, self.tech_indicator_list_trend = feature_lists(args.dataset)
         self.clf_list = ['slope_{}'.format(args.context_window), 'vol_{}'.format(args.context_window)]  # [TradeMaster] was *_360
         # [TradeMaster] standardise the context features with train-split statistics: slope_360 is a raw price
         # slope (scale of the price) and vol_360 ~1e-3, both fed unnormalised into hyperagent.fc2

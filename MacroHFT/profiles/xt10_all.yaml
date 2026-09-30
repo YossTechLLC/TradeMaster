@@ -1,0 +1,21 @@
+# [TradeMaster] P2b: all ten XT10 coordinates as the per-bar state, with the kline17 trend block
+# (the alternative to the tau-split in xt10.yaml).
+name: xt10_all
+description: XT10 all per-bar (10 single) + kline17 trend (4)
+strict: true
+single:
+  - {id: ret_0_1_sigma, fn: ret_sigma,    args: {a: 0, b: 1},  scale: z}
+  - {id: ret_1_3_sigma, fn: ret_sigma,    args: {a: 1, b: 3},  scale: z}
+  - {id: ret_3_8_sigma, fn: ret_sigma,    args: {a: 3, b: 8},  scale: z}
+  - {id: efficiency_13, fn: efficiency,   args: {w: 13},       scale: none}
+  - {id: mid_position,  fn: mid_position,                      scale: none}
+  - {id: ret_8_21_sigma,           fn: ret_sigma,               args: {a: 8, b: 21},        scale: z}
+  - {id: range_over_mean_range_1d, fn: range_over_mean_range,   args: {w: 96},              scale: log+z}
+  - {id: rv8_over_sigma,           fn: rv_over_sigma,           args: {w: 8},               scale: z}
+  - {id: trade_size_rel_1d,        fn: trade_size_rel,          args: {w: 96},              scale: z}
+  - {id: seasonal_activity_ahead,  fn: seasonal_activity_ahead, args: {ahead: 13},          scale: z}
+trend:   # W = 16 bars at 15m (4 h), 24 bars at 1h (1 day)
+  - {id: ret_W,             fn: window_return,   args: {w: {15m: 16, 1h: 24}}, scale: z}
+  - {id: rv_W,              fn: realized_vol,    args: {w: {15m: 16, 1h: 24}}, scale: log+z}
+  - {id: volume_surprise_W, fn: volume_surprise, args: {w: {15m: 16, 1h: 24}}, scale: robust}   # zero-volume (outage) bars are extreme outliers
+  - {id: flow_W,            fn: flow,            args: {w: {15m: 16, 1h: 24}}, scale: z}

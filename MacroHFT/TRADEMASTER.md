@@ -60,6 +60,8 @@ EMIT_JOBS=1 DATASET=BTCUSDT DEVICE=cpu ./run.sh train-low > /tmp/low.tsv
 
 The hyper-agent is one sequential process. Use the other cores for extra seeds or experiments: `-- --seed N --exp NAME` writes to its own `result/high_level/<DATASET>/<exp>/seed_<n>/`.
 
+**Input profiles** (`profiles/`, see `docs/macrohft_inputs.md` section 7): `./run.sh build PROFILE TIMEFRAME` builds `data/BTCUSDT_<tf>_<profile>/` from Binance spot klines with its own feature lists (read per dataset by the agents), train-fitted scaling and run settings (`run.env`, picked up by `decompose` and `train-high`). `./run.sh admit` runs the admission test; `profiles/plan_runs.sh` writes the staged job lists for `box/runjobs.sh`. Profiles: `upstream_real` (upstream inputs that need no order book), `kline17`, `xt10`, `xt10_all`.
+
 Bar size: the constants count bars (upstream uses 1-minute bars). For coarser bars, set `MACRO_CHUNK_SIZE` (default 4320) and `MACRO_CONTEXT_WINDOW` (default 360) for `decompose`, and pass `-- --context_window W --memory_capacity N` to `train-high`. The `*_trend_60` context features come from the data files, not from this code.
 
 ## Adaptations vs upstream

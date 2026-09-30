@@ -24,3 +24,16 @@ class LinearDecaySchedule(object):
 
     def get_epsilon(self, t):
         return max(self.end_epsilon, self.start_epsilon - (self.start_epsilon - self.end_epsilon) * (t / self.decay_length))
+
+
+def feature_lists(dataset):
+    # [TradeMaster] per-dataset input profile: data/<dataset>/feature_list/ (written by profiles/build.py),
+    # falling back to the upstream lists in data/feature_list/
+    import os
+    d = os.path.join('./data', dataset, 'feature_list')
+    if not os.path.exists(os.path.join(d, 'single_features.npy')):
+        d = './data/feature_list'
+    single = np.load(os.path.join(d, 'single_features.npy'), allow_pickle=True).tolist()
+    trend = np.load(os.path.join(d, 'trend_features.npy'), allow_pickle=True).tolist()
+    print("input features from {}: {} single, {} trend".format(d, len(single), len(trend)))
+    return single, trend

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Throughput benchmark for docs/bottlenecks.md, run on the BOX from the repo root (CPU, 1 thread per process).
 # Needs the fixtures: box/bench/build_data.py macro 1m 2024-01-01 30 12 9 BTCUSDT; ... earn 2024-03-01 4;
-# box/bench/golden.py prepare. Every job goes through box/runjobs.sh (per-job MemoryMax, 48 GB budget).
+# box/bench/golden.py prepare. Every job goes through box/runjobs.sh (our 16 CPU / 24 GB allocation).
 #
 #   box/bench/box_bench.sh [macro|earn|scale|all]
 set -uo pipefail
@@ -45,7 +45,7 @@ fi
 
 if [[ $what == scale || $what == all ]]; then
   echo "== Scaling: N copies of a 1-epoch hyper-agent job on BTCGOLD (6000 train + 1500 val + 1500 test bars)"
-  for n in 1 8 16 32; do
+  for n in 1 8 16; do   # our allocation is 16 CPUs
     : > "$OUT/scale_$n.tsv"
     for i in $(seq 1 "$n"); do
       printf 'h%s\tcd %s/MacroHFT && %s -u RL/agent/high_level.py --dataset BTCGOLD --device cpu --epoch_number 1 --exp scale%s --seed %s --subagent_path ./result/low_level/ETHUSDT/best_model\n' \
