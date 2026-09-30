@@ -51,9 +51,13 @@ class Testing_Env(gym.Env):
         self.terminal = False
         self.stack_length = back_time_length
         self.m = back_time_length
-        self.data = self.df.iloc[self.m - self.stack_length:self.m]
-        self.single_state = self.data[self.tech_indicator_list].values
-        self.trend_state = self.data[self.tech_indicator_list_trend].values
+        # [TradeMaster] pre-extract the arrays step() reads (was df.iloc + column selection on every step)
+        self._single = self.df[self.tech_indicator_list].to_numpy()
+        self._trend = self.df[self.tech_indicator_list_trend].to_numpy()
+        self._close = self.df["close"].to_numpy()
+        self._n_rows = len(self.df.index.unique())
+        self.single_state = self._single[self.m - self.stack_length:self.m]
+        self.trend_state = self._trend[self.m - self.stack_length:self.m]
         self.initial_reward = 0
         self.reward_history = [self.initial_reward]
         self.previous_action = initial_action
@@ -73,14 +77,12 @@ class Testing_Env(gym.Env):
 
     def reset(self):
         self.terminal = False
-        self.m = back_time_length
-        self.data = self.df.iloc[self.m - self.stack_length:self.m]
-        self.single_state = self.data[self.tech_indicator_list].values
-        self.trend_state = self.data[self.tech_indicator_list_trend].values
+        self.m = self.stack_length  # [TradeMaster] was the module-level back_time_length
+        self.single_state = self._single[self.m - self.stack_length:self.m]
+        self.trend_state = self._trend[self.m - self.stack_length:self.m]
         self.initial_reward = 0
         self.reward_history = [self.initial_reward]
         self.previous_action = self.initial_action
-        price_information = self.data.iloc[-1]
         self.previous_position = self.initial_action * self.max_holding_number
         self.position = self.initial_action * self.max_holding_number
         self.needed_money_memory = []
@@ -89,7 +91,7 @@ class Testing_Env(gym.Env):
         self.previous_position = self.initial_action * self.max_holding_number
         self.position = self.initial_action * self.max_holding_number
         self.needed_money_memory.append(self.position *
-                                        self.data.iloc[-1]["close"])
+                                        self._close[self.m - 1])
         self.sell_money_memory.append(0)
         return self.single_state, self.trend_state, {
             "previous_action": self.initial_action,
@@ -98,14 +100,13 @@ class Testing_Env(gym.Env):
     def step(self, action):
         normlized_action = action
         position = self.max_holding_number * normlized_action
-        self.terminal = (self.m >= len(self.df.index.unique()) - 1)
+        self.terminal = (self.m >= self._n_rows - 1)
         previous_position = self.previous_position
-        previous_price_information = self.data.iloc[-1]
+        previous_price_information = {"close": self._close[self.m - 1]}
         self.m += 1
-        self.data = self.df.iloc[self.m - self.stack_length:self.m]
-        current_price_information = self.data.iloc[-1]
-        self.single_state = self.data[self.tech_indicator_list].values
-        self.trend_state = self.data[self.tech_indicator_list_trend].values
+        current_price_information = {"close": self._close[self.m - 1]}
+        self.single_state = self._single[self.m - self.stack_length:self.m]
+        self.trend_state = self._trend[self.m - self.stack_length:self.m]
         self.previous_position = previous_position
         self.position = position
         self.changing = (self.position != self.previous_position)
@@ -171,10 +172,8 @@ class Testing_Env(gym.Env):
         needed_money_memory = np.array(self.needed_money_memory)
         true_money = sell_money_memory - needed_money_memory
         final_balance = np.sum(true_money)
-        balance_list = []
-        for i in range(len(true_money)):
-            balance_list.append(np.sum(true_money[:i + 1]))
-        required_money = -np.min(balance_list)
+        # [TradeMaster] running balance via cumsum (was an O(N^2) loop of prefix sums)
+        required_money = -np.min(np.cumsum(true_money))
         commission_fee = np.sum(self.comission_fee_history)
         return final_balance / required_money, final_balance, required_money, commission_fee
 
@@ -197,7 +196,7 @@ class Training_Env(Testing_Env):
         self.q_table = make_q_table_reward(df,
                                            num_action=2,
                                            max_holding=max_holding_number,
-                                           commission_fee=0.001,
+                                           commission_fee=transcation_cost,  # [TradeMaster] was 0.001, env trades at transcation_cost
                                            reward_scale=1,
                                            gamma=0.99,
                                            max_punish=1e12)

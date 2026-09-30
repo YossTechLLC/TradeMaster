@@ -1,4 +1,12 @@
 #Code reference: https://github.com/Lizhi-sjtu/DRL-code-pytorch/tree/main/3.Rainbow_DQN
+# [TradeMaster] thread caps must be set before numpy/torch are imported to take effect (upstream set
+# them after 'import torch'). TM_THREADS (default 1, the upstream intent) sets all of them; the BOX runs
+# many 1-thread processes side by side instead of one multi-threaded one.
+import os
+_THREADS = os.environ.get("TM_THREADS", "1")
+for _v in ("MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS", "OMP_NUM_THREADS"):
+    os.environ[_v] = _THREADS
+
 
 import sys
 
@@ -20,10 +28,10 @@ import copy
 from RL.util.graph import get_test_contrast_curve
 from RL.util.episode_selector import start_selector, get_transformation_exp
 import re
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["NUMEXPR_NUM_THREADS"] = "1"
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["F_ENABLE_ONEDNN_OPTS"] = "0"
+# [TradeMaster] per-pair feature lists: run.sh points EARNHFT_FEATURE_DIR at data/feature/<PAIR>
+FEATURE_DIR = os.environ.get("EARNHFT_FEATURE_DIR", "data/feature")
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"  # [TradeMaster] was the typo F_ENABLE_ONEDNN_OPTS
+torch.set_num_threads(int(_THREADS))  # [TradeMaster]
 
 parser = argparse.ArgumentParser()
 # path
@@ -86,14 +94,14 @@ class trader(object):
         self.transcation_cost = args.transcation_cost
         self.back_time_length = args.back_time_length
         self.reward_scale = args.reward_scale
-        self.tech_indicator_list = np.load("data/feature/second_feature.npy").tolist()
+        self.tech_indicator_list = np.load(os.path.join(FEATURE_DIR, "second_feature.npy")).tolist()
         self.initial_action=args.initial_action
         #network
         self.test_path=args.test_path
         # pattern = r'hidden_nodes_(\d+)'
         # match = re.search(pattern, self.test_path)
         self.hidden_nodes = 128
-        self.input_dim=len(np.load("data/feature/second_feature.npy",allow_pickle=True))
+        self.input_dim=len(np.load(os.path.join(FEATURE_DIR, "second_feature.npy"),allow_pickle=True))
   
         self.eval_net = Qnet(int(self.input_dim),
                              int(self.action_dim), int(self.hidden_nodes)).to(
@@ -109,8 +117,9 @@ class trader(object):
             torch.tensor([info["previous_action"]]).float(), 0).to(self.device)
         avaliable_action = torch.unsqueeze(
             torch.tensor(info["avaliable_action"]), 0).to(self.device)
-        actions_value = self.eval_net.forward(x, previous_action,
-                                              avaliable_action)
+        with torch.no_grad():  # [TradeMaster] inference only
+            actions_value = self.eval_net.forward(x, previous_action,
+                                                  avaliable_action)
         action = torch.max(actions_value, 1)[1].data.cpu().numpy()
         action = action[0]
         return action

@@ -491,6 +491,10 @@ class Worker:
         for i in range(0, len(longer) - len(shorter), step_size):
             distance, paths = fastdtw(shorter, longer[i : i + slice_length])
             distances.append(distance)
+        if not distances and len(shorter) > 0:
+            # [TradeMaster] equal lengths gave an empty range -> mean([]) = nan -> never merged
+            distance, paths = fastdtw(shorter, longer[:slice_length])
+            distances.append(distance)
         # normalize the distance by the length of the shorter segment and mean value of the shorter segment
         return np.mean(distances) / (slice_length * np.mean(shorter))
 
@@ -711,6 +715,17 @@ class Worker:
                         # pick the min distance that is smaller than the threshold to merge
                         # may choose to merge with the shorter neighbor for balanced segment length
 
+                        # [TradeMaster] the last entry is the end-of-data sentinel, not a segment. Its "right
+                        # neighbour" is empty, the DTW distance to it is nan, and `left < nan` is False, so the
+                        # segment was merged *into the sentinel*: the end index was lost and labels came out
+                        # shorter than the data (ValueError: Length of values ... does not match length of index).
+                        if next_index == len(turning_points) - 1:
+                            right_distance = float("inf")
+                        if left_distance != left_distance:  # nan
+                            left_distance = float("inf")
+                        if right_distance != right_distance:
+                            right_distance = float("inf")
+
                         if left_distance != float("inf"):
                             distance_list.append(left_distance)
                         if right_distance != float("inf"):
@@ -802,6 +817,8 @@ class Worker:
 
         # reshape turning_points to a 1d list
         turning_points = [i[0] for i in turning_points]
+        # [TradeMaster] segments must cover the whole series
+        assert turning_points[0] == 0 and turning_points[-1] == len(data), (turning_points[:2], turning_points[-2:], len(data))
 
         return (
             np.asarray(coef_list),

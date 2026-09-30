@@ -1,0 +1,11 @@
+# CPU-only variant of requirements-hft.txt, for the BOX and any machine without a GPU.
+# Same pins, with the CPU torch wheels (about 200 MB instead of about 2 GB of CUDA libraries).
+# MacroHFT and EarnHFT run one action per bar with tiny networks, so they are faster on CPU.
+#
+#   uv venv --python 3.10 --seed .venv-hft
+#   .venv-hft/bin/python -m pip install "pip<24.1" "setuptools==65.5.0" "wheel<0.40"
+#   .venv-hft/bin/python -m pip install -r requirements-hft-cpu.txt
+--extra-index-url https://download.pytorch.org/whl/cpu
+-r requirements-hft.txt
+torch==2.0.1+cpu
+torchvision==0.15.2+cpu

@@ -1,4 +1,12 @@
 # Code reference: https://github.com/Lizhi-sjtu/DRL-code-pytorch/tree/main/3.Rainbow_DQN
+# [TradeMaster] thread caps must be set before numpy/torch are imported to take effect (upstream set
+# them after 'import torch'). TM_THREADS (default 1, the upstream intent) sets all of them; the BOX runs
+# many 1-thread processes side by side instead of one multi-threaded one.
+import os
+_THREADS = os.environ.get("TM_THREADS", "1")
+for _v in ("MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS", "OMP_NUM_THREADS"):
+    os.environ[_v] = _THREADS
+
 
 import sys
 
@@ -25,11 +33,11 @@ from RL.util.episode_selector import (
     get_transformation_even_based_sigmoid_risk,
 )
 import re
+# [TradeMaster] per-pair feature lists: run.sh points EARNHFT_FEATURE_DIR at data/feature/<PAIR>
+FEATURE_DIR = os.environ.get("EARNHFT_FEATURE_DIR", "data/feature")
 
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["NUMEXPR_NUM_THREADS"] = "1"
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["F_ENABLE_ONEDNN_OPTS"] = "0"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"  # [TradeMaster] was the typo F_ENABLE_ONEDNN_OPTS
+torch.set_num_threads(int(_THREADS))  # [TradeMaster]
 
 parser = argparse.ArgumentParser()
 # replay buffer coffient
@@ -200,6 +208,19 @@ parser.add_argument(
     default=0.1,
     help="risk bond for the PES",
 )
+# [TradeMaster] were hard-coded (chunk_num = 14400, epoch_number = 4); defaults unchanged
+parser.add_argument(
+    "--chunk_length",
+    type=int,
+    default=14400,
+    help="steps per training chunk (split_data.py --chunk_length; chunks carry extra look-ahead rows)",
+)
+parser.add_argument(
+    "--epoch_number",
+    type=int,
+    default=4,
+    help="training samples (episodes) per saved epoch checkpoint",
+)
 
 
 def seed_torch(seed):
@@ -290,9 +311,10 @@ class DQN(object):
         #     pd.read_feather(args.test_data_path),
         # ]
         self.train_data_path = args.train_data_path
-        self.chunk_num = 14400
+        self.chunk_num = args.chunk_length  # [TradeMaster] was 14400
+        self.epoch_number = args.epoch_number  # [TradeMaster] was a local 4 in train()
 
-        self.tech_indicator_list = np.load("data/feature/second_feature.npy").tolist()
+        self.tech_indicator_list = np.load(os.path.join(FEATURE_DIR, "second_feature.npy")).tolist()
 
         self.n_state = len(self.tech_indicator_list)
         # network & loss function
@@ -327,7 +349,7 @@ class DQN(object):
             info_["avaliable_action"],
         ).detach()
         # since investigating is a open end problem, we do not use the done here to update
-        q_target = rewards + torch.max(q_next, 1)[0].view(self.batch_size, 1) * (
+        q_target = rewards + self.gamma * torch.max(q_next, 1)[0].view(self.batch_size, 1) * (  # [TradeMaster] gamma was ignored
             1 - dones
         )
 
@@ -379,7 +401,8 @@ class DQN(object):
         ).to(self.device)
 
         if np.random.uniform() > epsilon:
-            actions_value = self.eval_net.forward(x, previous_action, avaliable_action)
+            with torch.no_grad():  # [TradeMaster] inference only
+                actions_value = self.eval_net.forward(x, previous_action, avaliable_action)
             action = torch.max(actions_value, 1)[1].data.cpu().numpy()
             action = action[0]
         else:
@@ -402,7 +425,8 @@ class DQN(object):
         avaliable_action = torch.unsqueeze(
             torch.tensor(info["avaliable_action"]), 0
         ).to(self.device)
-        actions_value = self.eval_net.forward(x, previous_action, avaliable_action)
+        with torch.no_grad():  # [TradeMaster]
+            actions_value = self.eval_net.forward(x, previous_action, avaliable_action)
         action = torch.max(actions_value, 1)[1].data.cpu().numpy()
         action = action[0]
         return action
@@ -413,18 +437,31 @@ class DQN(object):
         epoch_required_money_train_list = []
         epoch_reward_sum_train_list = []
         # epoch_number = int(len(self.train_df) / self.chunk_length)
-        epoch_number = 4
+        epoch_number = self.epoch_number  # [TradeMaster]
         random_position_list = random.choices(range(self.action_dim), k=self.num_sample)
         return_rate_list = []
-        df_number=len(os.listdir(self.train_data_path))-1
-        for i in range(df_number):
-            df = pd.read_feather(
-                os.path.join(self.train_data_path, "df_{}.feather".format(i))
+        # [TradeMaster] was len(os.listdir(...)) - 1, i.e. "every file but one" (the short tail chunk):
+        # any other file in train/ shifted the count. Use the df_<i>.feather chunks that are longer
+        # than one training episode, which for split_data.py output is the same set.
+        chunk_files = sorted(
+            (int(m.group(1)) for m in (re.fullmatch(r"df_(\d+)\.feather", f) for f in os.listdir(self.train_data_path)) if m)
+        )
+        df_number = 0
+        for i in chunk_files:
+            if i != df_number:
+                raise ValueError("training chunks must be df_0 .. df_N without gaps; df_{} missing".format(df_number))
+            df = pd.read_feather(  # [TradeMaster] only the two columns used here (was the whole chunk)
+                os.path.join(self.train_data_path, "df_{}.feather".format(i)), columns=["bid1_price", "ask1_price"]
             )
+            if len(df) <= self.chunk_num:
+                break  # the short tail chunk(s)
 
             return_rate_list.append(
                 (df.iloc[self.chunk_num]["bid1_price"] / df.iloc[0]["ask1_price"] - 1)
             )
+            df_number += 1
+        if df_number == 0:
+            raise ValueError("no training chunk in {} is longer than --chunk_length {}".format(self.train_data_path, self.chunk_num))
         initial_priority_list = self.priority_transformation(
             return_rate_list, beta=self.beta, risk_bond=self.risk_bond
         )
@@ -475,11 +512,9 @@ class DQN(object):
                     if self.ada - self.ada_decay > self.ada_min
                     else self.ada_min
                 )
-                self.epsilon = (
-                    self.epsilon - self.epsilon_decay
-                    if self.epsilon - self.epsilon_decay > self.epsilon_min
-                    else self.epsilon_min
-                )
+                # [TradeMaster] epsilon is only used by the policy pass: it no longer decays during the
+                # teacher pass (that made exploration decay twice as fast as --epsilon_step says).
+                # ada and lr keep decaying here, since updates also happen in this pass.
                 self.lr = (
                     self.lr - self.lr_decay
                     if self.lr - self.lr_decay > self.lr_min
@@ -524,18 +559,8 @@ class DQN(object):
                         )
                 if done:
                     break
-            train_env = Training_Env(
-                df=self.train_df,
-                tech_indicator_list=self.tech_indicator_list,
-                transcation_cost=self.transcation_cost,
-                back_time_length=self.back_time_length,
-                max_holding_number=self.max_holding_number,
-                action_dim=self.action_dim,
-                gamma=self.gamma,
-                reward_scale=self.reward_scale,
-                initial_action=random_position_list[sample],
-                early_end=early_end,
-            )
+            # [TradeMaster] reuse the teacher-pass env (was rebuilt on the same chunk, recomputing the
+            # Q-teacher table): reset() restores the whole episode state, incl. the initial position
             s, info = train_env.reset()
             episode_reward_sum = 0
             while True:
@@ -717,7 +742,7 @@ class DQN(object):
     def test(self, epoch_path):
         print("we are testing")
         self.eval_net.load_state_dict(
-            torch.load(os.path.join(epoch_path, "trained_model.pkl"))
+            torch.load(os.path.join(epoch_path, "trained_model.pkl"), map_location=self.device)  # [TradeMaster]
         )
         for name, df in zip(
             ["valid", "test"],

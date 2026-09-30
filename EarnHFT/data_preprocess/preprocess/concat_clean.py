@@ -61,7 +61,8 @@ def get_order_book_data(args):
     df_list = []
     for file in filter_order_book_file:
         df_list.append(
-            pd.read_csv(os.path.join(orderbook_dir, file), engine='python'))
+            # [TradeMaster] C parser (was engine='python', ~10x slower); round_trip keeps Python's float() parsing
+            pd.read_csv(os.path.join(orderbook_dir, file), float_precision="round_trip"))
     orderbook_df = pd.concat(df_list, axis=0)
     orderbook_df = orderbook_df.drop(columns=["exchange", "local_timestamp"])
     orderbook_df['timestamp'] = pd.to_datetime(orderbook_df['timestamp'] *

@@ -18,7 +18,7 @@ uv venv --python 3.9 --seed .venv
 # extensions
 uv venv --python 3.10 --seed .venv-hft
 .venv-hft/bin/python -m pip install "pip<24.1" "setuptools==65.5.0" "wheel<0.40"
-.venv-hft/bin/python -m pip install -r requirements-hft.txt
+.venv-hft/bin/python -m pip install -r requirements-hft.txt       # or requirements-hft-cpu.txt on CPU-only hosts (the BOX)
 ```
 
 The pins are load-bearing. Don't upgrade them casually:
@@ -40,6 +40,15 @@ Run everything from the repo root. Config data paths such as `data/algorithmic_t
 ```
 
 Outputs go to `work_dir/<config name>/`, which is git-ignored.
+
+**HFT extensions (MacroHFT, EarnHFT):** check that a performance change leaves results unchanged with the golden check, and run the differential tests (`box/README.md`):
+
+```bash
+.venv-hft/bin/python box/bench/golden.py run before   # on the old code (after `golden.py prepare`)
+.venv-hft/bin/python box/bench/golden.py run after    # on the new code
+.venv-hft/bin/python box/bench/golden.py compare before after
+for t in box/bench/tests/test_*.py; do .venv-hft/bin/python $t; done
+```
 
 **Tests:** `unit_testing/` is stale. It references configs that don't exist (e.g. `dqn_btc.py`), one file has a syntax error, and pytest isn't installed. Don't treat it as a test suite. Verify changes by running the relevant `tools/*/train.py`. There is no lint configuration.
 
@@ -78,7 +87,7 @@ These are upstream repositories copied in without history; the upstream commit i
 **Read `<project>/TRADEMASTER.md` first.** It maps paper components to files, lists pipeline stages and data prerequisites, and records every deviation from upstream.
 
 Rules for working in them:
-- Each has a `run.sh` launcher (`./run.sh help`). It sets the correct working directory, uses `.venv-hft`, runs on one GPU in the foreground, and writes logs.
+- Each has a `run.sh` launcher (`./run.sh help`). It sets the correct working directory, uses `.venv-hft`, runs on one device in the foreground, and writes logs. `EMIT_JOBS=1 ./run.sh <stage>` lists the stage's jobs instead, for `box/runjobs.sh`.
   - The launcher `cd`s for you. Upstream code assumes cwd-relative paths (`./data`, `./result`, `data/feature/*.npy`).
   - Upstream `script*/` and `*.sh` files are kept as reference only. They hard-code `cuda:1-3` and `nohup … &`.
 - Keep upstream code unmodified where possible. Mark any necessary fix with `# [TradeMaster]` and list it in that project's `TRADEMASTER.md`.
@@ -92,8 +101,8 @@ Rules for working in them:
 
 ## Remote compute
 
-`box/init_box.sh` sets up this repo on a borrowed host (ssh alias `chad-box`, into `/home/chad/TradeMaster` only). It has stages `check`, `sync`, `venv-hft`, `venv-core`, `smoke`, `bench` and `status`. Host rules:
-- Keep total RAM at or below 48 GB, and wrap every heavy command in `systemd-run --user --scope -p MemoryMax=…`.
-- Keep at least 20 GiB of disk free.
+The BOX (ssh alias `chad-box`, repo in `/home/chad/TradeMaster` only) runs MacroHFT and EarnHFT on CPU. It has a CPU-only `.venv-hft` (`requirements-hft-cpu.txt`). Scaling comes from many 1-thread processes, not threads. `box/README.md` has the sync command, the job runner and per-workload sizes. There is no `init_box.sh`.
+- Run parallel work through `box/runjobs.sh`. It wraps each job in `systemd-run --user --scope -p MemoryMax=…` and enforces the rules below.
+- Keep total RAM at or below 48 GB, and keep at least 20 GiB of disk free.
 - Never touch the owner's files or processes (`SIMONS_v3`, other GPU jobs).
-- Copying files to the host needs the user's explicit approval.
+- Copying files to the host needs the user's explicit approval. rsync never uses `--delete`.

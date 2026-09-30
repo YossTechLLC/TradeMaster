@@ -17,6 +17,12 @@ parser.add_argument("--save_path",
                     type=str,
                     default="ic_analysis/feature_analysis",
                     help="the path of storing the data")
+# [TradeMaster] select features on the training part only (split_data.py uses the first 60% as train);
+# upstream correlated over the whole file, i.e. also over the valid and test periods
+parser.add_argument("--train_fraction",
+                    type=float,
+                    default=0.6,
+                    help="leading fraction of df.feather used for the IC analysis (1.0 = upstream)")
 reward_features = [
     "timestamp",
     "symbol",
@@ -83,8 +89,14 @@ def analysis_ic_longterm(df: pd.DataFrame, period=1, theshold=0.01):
         "close",
         "midpoint",
     ]
+    # [TradeMaster] work on a copy: df["return"] (the *future* price change) used to be written into the
+    # caller's frame, so the second call (period=60) selected "return" itself as a minute feature
+    # (a look-ahead leak, and train-high then failed with KeyError: 'return' on the real df.feather)
+    df = df.copy()
     feature = df.columns.tolist()
-    feature = list(set(feature).difference(set(reward_features)))
+    feature = list(set(feature).difference(set(reward_features + ["return"])))
+    feature = [f for f in feature if pd.api.types.is_numeric_dtype(df[f])]  # [TradeMaster] skip text columns (tic, ...)
+    feature.sort()  # [TradeMaster] deterministic order (was set order)
     return_rate = df["bid1_price"].diff(periods=period).tolist()
     for i in range(period):
         return_rate.pop(0)
@@ -107,6 +119,7 @@ def analysis_ic_longterm(df: pd.DataFrame, period=1, theshold=0.01):
 
 def get_analysis_result(args):
     df = pd.read_feather(args.data_path)
+    df = df.iloc[:int(len(df) * args.train_fraction)].reset_index(drop=True)  # [TradeMaster]
     start_date, end_date, ticker = find_dates_tic(args.data_path)
     feature_train, presever_features = analysis_ic_longterm(df ,period=1, theshold=0.01)
 

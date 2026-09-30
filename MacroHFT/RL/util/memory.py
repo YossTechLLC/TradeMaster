@@ -45,7 +45,10 @@ class episodicmemory():
         if self.current_size != self.capacity:
             weighted_q_value = np.nan
         else:
-            kernel_values = np.array([custom_kernel(query_hidden_state, hs) for hs in self.buffer["hidden_state"]])
+            # [TradeMaster] vectorised custom_kernel over the whole buffer (was one Python call per entry,
+            # ~54% of hyper-agent time); identical values, same argsort order below
+            squared_distance = np.sum((self.buffer["hidden_state"] - query_hidden_state) ** 2, axis=1)
+            kernel_values = 1 / (squared_distance + 1e-3)
             top_k_indices = np.argsort(kernel_values)[-self.k:]
             top_k_actions = self.buffer["action"][top_k_indices]
             top_k_q_values = self.buffer["q_value"][top_k_indices]

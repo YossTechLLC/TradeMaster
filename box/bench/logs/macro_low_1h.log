@@ -1,0 +1,11 @@
+1790723410.255 Namespace(buffer_size=1000000, dataset='BTCUSDT', q_value_memorize_freq=10, batch_size=512, eval_update_freq=100, lr=0.0001, epsilon_start=0.5, epsilon_end=0.1, decay_length=5, update_times=10, gamma=0.99, tau=0.005, transcation_cost=0.0002, back_time_length=1, seed=777, n_step=1, epoch_number=1, label='label_2', clf='slope', alpha=4.0, device='cpu')
+1790723410.257 epoch  1
+1790723410.257 [1]
+1790723410.257 training with df 1
+1790723413.653 the portfit margine is  -0.09370547161379247
+1790723413.654 validating on df 0
+1790723415.594 the portfit margine is  0.07406856936167587
+1790723415.602 validating on df 0
+1790723417.536 the portfit margine is  0.07464613493286751
+1790723417.544 best model updated to epoch  1
+1790723417.758 1h LOW WALL 8.16 s

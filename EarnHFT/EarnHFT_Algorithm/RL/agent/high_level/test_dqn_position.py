@@ -1,4 +1,12 @@
 # Code reference: https://github.com/Lizhi-sjtu/DRL-code-pytorch/tree/main/3.Rainbow_DQN
+# [TradeMaster] thread caps must be set before numpy/torch are imported to take effect (upstream set
+# them after 'import torch'). TM_THREADS (default 1, the upstream intent) sets all of them; the BOX runs
+# many 1-thread processes side by side instead of one multi-threaded one.
+import os
+_THREADS = os.environ.get("TM_THREADS", "1")
+for _v in ("MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS", "OMP_NUM_THREADS"):
+    os.environ[_v] = _THREADS
+
 
 import sys
 
@@ -22,11 +30,11 @@ import copy
 from RL.util.graph import get_test_contrast_curve_high_level
 from RL.util.episode_selector import start_selector, get_transformation_exp
 import re
+# [TradeMaster] per-pair feature lists: run.sh points EARNHFT_FEATURE_DIR at data/feature/<PAIR>
+FEATURE_DIR = os.environ.get("EARNHFT_FEATURE_DIR", "data/feature")
 
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["NUMEXPR_NUM_THREADS"] = "1"
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["F_ENABLE_ONEDNN_OPTS"] = "0"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"  # [TradeMaster] was the typo F_ENABLE_ONEDNN_OPTS
+torch.set_num_threads(int(_THREADS))  # [TradeMaster]
 
 parser = argparse.ArgumentParser()
 # path
@@ -102,159 +110,16 @@ class trader(object):
         
 
         # trading setting
-        assert args.dataset_name in ["BTCUSDT", "ETHUSDT", "GALAUSDT","BTCTUSD"]
-        if args.dataset_name == "BTCUSDT":
-            model_path_list_dict = {
-                0: [
-                    "result_risk/BTCUSDT/potential_model/initial_action_0/model_0.pth",
-                    "result_risk/BTCUSDT/potential_model/initial_action_0/model_1.pth",
-                    "result_risk/BTCUSDT/potential_model/initial_action_0/model_2.pth",
-                    "result_risk/BTCUSDT/potential_model/initial_action_0/model_3.pth",
-                    "result_risk/BTCUSDT/potential_model/initial_action_0/model_4.pth",
-                ],
-                1: [
-                    "result_risk/BTCUSDT/potential_model/initial_action_1/model_0.pth",
-                    "result_risk/BTCUSDT/potential_model/initial_action_1/model_1.pth",
-                    "result_risk/BTCUSDT/potential_model/initial_action_1/model_2.pth",
-                    "result_risk/BTCUSDT/potential_model/initial_action_1/model_3.pth",
-                    "result_risk/BTCUSDT/potential_model/initial_action_1/model_4.pth",
-                ],
-                2: [
-                    "result_risk/BTCUSDT/potential_model/initial_action_2/model_0.pth",
-                    "result_risk/BTCUSDT/potential_model/initial_action_2/model_1.pth",
-                    "result_risk/BTCUSDT/potential_model/initial_action_2/model_2.pth",
-                    "result_risk/BTCUSDT/potential_model/initial_action_2/model_3.pth",
-                    "result_risk/BTCUSDT/potential_model/initial_action_2/model_4.pth",
-                ],
-                3: [
-                    "result_risk/BTCUSDT/potential_model/initial_action_3/model_0.pth",
-                    "result_risk/BTCUSDT/potential_model/initial_action_3/model_1.pth",
-                    "result_risk/BTCUSDT/potential_model/initial_action_3/model_2.pth",
-                    "result_risk/BTCUSDT/potential_model/initial_action_3/model_3.pth",
-                    "result_risk/BTCUSDT/potential_model/initial_action_3/model_4.pth",
-                ],
-                4: [
-                    "result_risk/BTCUSDT/potential_model/initial_action_4/model_0.pth",
-                    "result_risk/BTCUSDT/potential_model/initial_action_4/model_1.pth",
-                    "result_risk/BTCUSDT/potential_model/initial_action_4/model_2.pth",
-                    "result_risk/BTCUSDT/potential_model/initial_action_4/model_3.pth",
-                    "result_risk/BTCUSDT/potential_model/initial_action_4/model_4.pth",
-                ],
-            }
-        elif args.dataset_name == "ETHUSDT":
-            model_path_list_dict = {
-                0: [
-                    "result_risk/ETHUSDT/potential_model/initial_action_0/model_0.pth",
-                    "result_risk/ETHUSDT/potential_model/initial_action_0/model_1.pth",
-                    "result_risk/ETHUSDT/potential_model/initial_action_0/model_2.pth",
-                    "result_risk/ETHUSDT/potential_model/initial_action_0/model_3.pth",
-                    "result_risk/ETHUSDT/potential_model/initial_action_0/model_4.pth",
-                ],
-                1: [
-                    "result_risk/ETHUSDT/potential_model/initial_action_1/model_0.pth",
-                    "result_risk/ETHUSDT/potential_model/initial_action_1/model_1.pth",
-                    "result_risk/ETHUSDT/potential_model/initial_action_1/model_2.pth",
-                    "result_risk/ETHUSDT/potential_model/initial_action_1/model_3.pth",
-                    "result_risk/ETHUSDT/potential_model/initial_action_1/model_4.pth",
-                ],
-                2: [
-                    "result_risk/ETHUSDT/potential_model/initial_action_2/model_0.pth",
-                    "result_risk/ETHUSDT/potential_model/initial_action_2/model_1.pth",
-                    "result_risk/ETHUSDT/potential_model/initial_action_2/model_2.pth",
-                    "result_risk/ETHUSDT/potential_model/initial_action_2/model_3.pth",
-                    "result_risk/ETHUSDT/potential_model/initial_action_2/model_4.pth",
-                ],
-                3: [
-                    "result_risk/ETHUSDT/potential_model/initial_action_3/model_0.pth",
-                    "result_risk/ETHUSDT/potential_model/initial_action_3/model_1.pth",
-                    "result_risk/ETHUSDT/potential_model/initial_action_3/model_2.pth",
-                    "result_risk/ETHUSDT/potential_model/initial_action_3/model_3.pth",
-                    "result_risk/ETHUSDT/potential_model/initial_action_3/model_4.pth",
-                ],
-                4: [
-                    "result_risk/ETHUSDT/potential_model/initial_action_4/model_0.pth",
-                    "result_risk/ETHUSDT/potential_model/initial_action_4/model_1.pth",
-                    "result_risk/ETHUSDT/potential_model/initial_action_4/model_2.pth",
-                    "result_risk/ETHUSDT/potential_model/initial_action_4/model_3.pth",
-                    "result_risk/ETHUSDT/potential_model/initial_action_4/model_4.pth",
-                ],
-            }
-        elif args.dataset_name == "GALAUSDT":
-            model_path_list_dict = {
-                0: [
-                    "result_risk/GALAUSDT/potential_model/initial_action_0/model_0.pth",
-                    "result_risk/GALAUSDT/potential_model/initial_action_0/model_1.pth",
-                    "result_risk/GALAUSDT/potential_model/initial_action_0/model_2.pth",
-                    "result_risk/GALAUSDT/potential_model/initial_action_0/model_3.pth",
-                    "result_risk/GALAUSDT/potential_model/initial_action_0/model_4.pth",
-                ],
-                1: [
-                    "result_risk/GALAUSDT/potential_model/initial_action_1/model_0.pth",
-                    "result_risk/GALAUSDT/potential_model/initial_action_1/model_1.pth",
-                    "result_risk/GALAUSDT/potential_model/initial_action_1/model_2.pth",
-                    "result_risk/GALAUSDT/potential_model/initial_action_1/model_3.pth",
-                    "result_risk/GALAUSDT/potential_model/initial_action_1/model_4.pth",
-                ],
-                2: [
-                    "result_risk/GALAUSDT/potential_model/initial_action_2/model_0.pth",
-                    "result_risk/GALAUSDT/potential_model/initial_action_2/model_1.pth",
-                    "result_risk/GALAUSDT/potential_model/initial_action_2/model_2.pth",
-                    "result_risk/GALAUSDT/potential_model/initial_action_2/model_3.pth",
-                    "result_risk/GALAUSDT/potential_model/initial_action_2/model_4.pth",
-                ],
-                3: [
-                    "result_risk/GALAUSDT/potential_model/initial_action_3/model_0.pth",
-                    "result_risk/GALAUSDT/potential_model/initial_action_3/model_1.pth",
-                    "result_risk/GALAUSDT/potential_model/initial_action_3/model_2.pth",
-                    "result_risk/GALAUSDT/potential_model/initial_action_3/model_3.pth",
-                    "result_risk/GALAUSDT/potential_model/initial_action_3/model_4.pth",
-                ],
-                4: [
-                    "result_risk/GALAUSDT/potential_model/initial_action_4/model_0.pth",
-                    "result_risk/GALAUSDT/potential_model/initial_action_4/model_1.pth",
-                    "result_risk/GALAUSDT/potential_model/initial_action_4/model_2.pth",
-                    "result_risk/GALAUSDT/potential_model/initial_action_4/model_3.pth",
-                    "result_risk/GALAUSDT/potential_model/initial_action_4/model_4.pth",
-                ],
-            }
-        elif args.dataset_name == "BTCTUSD":
-            model_path_list_dict = {
-                0: [
-                    "result_risk/BTCTUSD/potential_model/initial_action_0/model_0.pth",
-                    "result_risk/BTCTUSD/potential_model/initial_action_0/model_1.pth",
-                    "result_risk/BTCTUSD/potential_model/initial_action_0/model_2.pth",
-                    "result_risk/BTCTUSD/potential_model/initial_action_0/model_3.pth",
-                    "result_risk/BTCTUSD/potential_model/initial_action_0/model_4.pth",
-                ],
-                1: [
-                    "result_risk/BTCTUSD/potential_model/initial_action_1/model_0.pth",
-                    "result_risk/BTCTUSD/potential_model/initial_action_1/model_1.pth",
-                    "result_risk/BTCTUSD/potential_model/initial_action_1/model_2.pth",
-                    "result_risk/BTCTUSD/potential_model/initial_action_1/model_3.pth",
-                    "result_risk/BTCTUSD/potential_model/initial_action_1/model_4.pth",
-                ],
-                2: [
-                    "result_risk/BTCTUSD/potential_model/initial_action_2/model_0.pth",
-                    "result_risk/BTCTUSD/potential_model/initial_action_2/model_1.pth",
-                    "result_risk/BTCTUSD/potential_model/initial_action_2/model_2.pth",
-                    "result_risk/BTCTUSD/potential_model/initial_action_2/model_3.pth",
-                    "result_risk/BTCTUSD/potential_model/initial_action_2/model_4.pth",
-                ],
-                3: [
-                    "result_risk/BTCTUSD/potential_model/initial_action_3/model_0.pth",
-                    "result_risk/BTCTUSD/potential_model/initial_action_3/model_1.pth",
-                    "result_risk/BTCTUSD/potential_model/initial_action_3/model_2.pth",
-                    "result_risk/BTCTUSD/potential_model/initial_action_3/model_3.pth",
-                    "result_risk/BTCTUSD/potential_model/initial_action_3/model_4.pth",
-                ],
-                4: [
-                    "result_risk/BTCTUSD/potential_model/initial_action_4/model_0.pth",
-                    "result_risk/BTCTUSD/potential_model/initial_action_4/model_1.pth",
-                    "result_risk/BTCTUSD/potential_model/initial_action_4/model_2.pth",
-                    "result_risk/BTCTUSD/potential_model/initial_action_4/model_3.pth",
-                    "result_risk/BTCTUSD/potential_model/initial_action_4/model_4.pth",
-                ],
-            }
+        # [TradeMaster] the pool paths were hard-coded per pair (BTCUSDT/ETHUSDT/GALAUSDT/BTCTUSD) with the
+        # same layout pick_agent_position.py writes; build them for any pair instead
+        pool_root = os.path.join(getattr(args, "result_path", "result_risk"), args.dataset_name, "potential_model")
+        model_path_list_dict = {
+            a: [os.path.join(pool_root, "initial_action_{}".format(a), "model_{}.pth".format(i)) for i in range(5)]
+            for a in range(5)
+        }
+        missing = [m for ms in model_path_list_dict.values() for m in ms if not os.path.exists(m)]
+        if missing:
+            raise FileNotFoundError("agent pool missing (run the 'pick' stage first): {}".format(missing[:3]))
         self.model_path_list_dict = model_path_list_dict
         self.num_model = len(self.model_path_list_dict[0])
         self.max_holding_number = args.max_holding_number
@@ -265,10 +130,10 @@ class trader(object):
         # RL setting
 
         self.high_level_tech_indicator_list = np.load(
-            "data/feature/minitue_feature.npy"
+            os.path.join(FEATURE_DIR, "minitue_feature.npy")
         ).tolist()
         self.low_level_tech_indicator_list = np.load(
-            "data/feature/second_feature.npy"
+            os.path.join(FEATURE_DIR, "second_feature.npy")
         ).tolist()
         self.n_state = len(self.high_level_tech_indicator_list)
         
@@ -294,7 +159,8 @@ class trader(object):
     def act_test(self, info):
         x = torch.tensor(info["high_level_state"]).to(self.device).to(torch.float32)
         position=torch.tensor([info["previous_action"]]).to(self.device).to(torch.float32).unsqueeze(1)
-        actions_value = self.eval_net.forward(x,position)
+        with torch.no_grad():  # [TradeMaster] inference only
+            actions_value = self.eval_net.forward(x,position)
         action = torch.max(actions_value, 1)[1].data.cpu().numpy()
         action = action[0]
         return action

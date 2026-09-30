@@ -2,8 +2,17 @@ import numpy as np
 import pandas as pd
 import os
 import pickle
+import sys
 from scipy.signal import butter, filtfilt
 from sklearn.linear_model import LinearRegression
+
+# [TradeMaster] dataset is argv[1] (was hard-coded ETHUSDT); run.sh passes $DATASET.
+# Bar-count constants (upstream: 1-minute bars) can be rescaled for coarser bars through the environment:
+#   MACRO_CHUNK_SIZE (4320 = 3 days of minutes): market-type chunks for the sub-agents
+#   MACRO_CONTEXT_WINDOW (360): rolling slope_<w> / vol_<w> context features of the hyper-agent
+DATA = os.path.join('./data', sys.argv[1] if __name__ == "__main__" and len(sys.argv) > 1 else 'ETHUSDT')
+CHUNK_SIZE = int(os.environ.get("MACRO_CHUNK_SIZE", 4320))
+CONTEXT_WINDOW = int(os.environ.get("MACRO_CONTEXT_WINDOW", 360))
 
 def smooth_data(data):
     N, Wn = 1, 0.05
@@ -24,27 +33,27 @@ def get_slope_window(window):
     return model.coef_[0]
 
 def chunk(df_train, df_val, df_test):
-    chunk_size = 4320
+    chunk_size = CHUNK_SIZE  # [TradeMaster] was 4320
     for i in range(int(len(df_train) / chunk_size)):
         start = i * chunk_size
         end = (i + 1) * chunk_size
         df_chunk = df_train[start:end].reset_index(drop=True)
-        df_chunk.to_feather('./data/ETHUSDT/train/df_{}.feather'.format(i))
+        df_chunk.to_feather(os.path.join(DATA, 'train', 'df_{}.feather'.format(i)))
 
     for i in range(int(len(df_val) / chunk_size)):
         start = i * chunk_size
         end = (i + 1) * chunk_size
         df_chunk = df_val[start:end].reset_index(drop=True)
-        df_chunk.to_feather('./data/ETHUSDT/val/df_{}.feather'.format(i))
+        df_chunk.to_feather(os.path.join(DATA, 'val', 'df_{}.feather'.format(i)))
 
     for i in range(int(len(df_test) / chunk_size)):
         start = i * chunk_size
         end = (i + 1) * chunk_size
         df_chunk = df_test[start:end].reset_index(drop=True)
-        df_chunk.to_feather('./data/ETHUSDT/test/df_{}.feather'.format(i))
+        df_chunk.to_feather(os.path.join(DATA, 'test', 'df_{}.feather'.format(i)))
 
 def label_slope(df_train, df_val, df_test):
-    chunk_size = 4320
+    chunk_size = CHUNK_SIZE  # [TradeMaster] was 4320
     slopes_train = []
     for i in range(0, int(len(df_train) / chunk_size)):
         start = i * chunk_size
@@ -80,11 +89,12 @@ def label_slope(df_train, df_val, df_test):
     test_indices = [[] for _ in range(5)]
     for index, label in enumerate(slope_labels_train):
         train_indices[label].append(index)
-    with open('./data/ETHUSDT/train/slope_labels.pkl', 'wb') as file:
+    with open(os.path.join(DATA, 'train', 'slope_labels.pkl'), 'wb') as file:
         pickle.dump(train_indices, file)
 
-    bins[0] = -100
-    bins[-1] = 100
+    # [TradeMaster] open-ended outer bins (were -100/100: a pair with larger slopes got NaN labels and crashed)
+    bins[0] = -np.inf
+    bins[-1] = np.inf
     slope_labels_val = pd.cut(slopes_val, bins=bins, labels=False, include_lowest=True)
     slope_labels_val = [1 if element == 0 else element for element in slope_labels_val]
     slope_labels_val = [3 if element == 4 else element for element in slope_labels_val]
@@ -94,15 +104,15 @@ def label_slope(df_train, df_val, df_test):
 
     for index, label in enumerate(slope_labels_val):
         val_indices[label].append(index)
-    with open('./data/ETHUSDT/val/slope_labels.pkl', 'wb') as file:
+    with open(os.path.join(DATA, 'val', 'slope_labels.pkl'), 'wb') as file:
         pickle.dump(val_indices, file)
     for index, label in enumerate(slope_labels_test):
         test_indices[label].append(index)
-    with open('./data/ETHUSDT/test/slope_labels.pkl', 'wb') as file:
+    with open(os.path.join(DATA, 'test', 'slope_labels.pkl'), 'wb') as file:
         pickle.dump(test_indices, file)
 
 def label_volatility(df_train, df_val, df_test):
-    chunk_size = 4320
+    chunk_size = CHUNK_SIZE  # [TradeMaster] was 4320
     volatilities_train = []
     for i in range(0, int(len(df_train) / chunk_size)):
         start = i * chunk_size
@@ -138,11 +148,12 @@ def label_volatility(df_train, df_val, df_test):
     test_indices = [[] for _ in range(5)]
     for index, label in enumerate(vol_labels_train):
         train_indices[label].append(index)
-    with open('./data/ETHUSDT/train/vol_labels.pkl', 'wb') as file:
+    with open(os.path.join(DATA, 'train', 'vol_labels.pkl'), 'wb') as file:
         pickle.dump(train_indices, file)
 
-    bins[0] = 0
-    bins[-1] = 1
+    # [TradeMaster] open-ended outer bins (were 0/1)
+    bins[0] = -np.inf
+    bins[-1] = np.inf
     vol_labels_val = pd.cut(volatilities_val, bins=bins, labels=False, include_lowest=True)
     vol_labels_val = [1 if element == 0 else element for element in vol_labels_val]
     vol_labels_val = [3 if element == 4 else element for element in vol_labels_val]
@@ -152,31 +163,48 @@ def label_volatility(df_train, df_val, df_test):
 
     for index, label in enumerate(vol_labels_val):
         val_indices[label].append(index)
-    with open('./data/ETHUSDT/val/vol_labels.pkl', 'wb') as file:
+    with open(os.path.join(DATA, 'val', 'vol_labels.pkl'), 'wb') as file:
         pickle.dump(val_indices, file)
     for index, label in enumerate(vol_labels_test):
         test_indices[label].append(index)
-    with open('./data/ETHUSDT/test/vol_labels.pkl', 'wb') as file:
+    with open(os.path.join(DATA, 'test', 'vol_labels.pkl'), 'wb') as file:
         pickle.dump(test_indices, file)
 
+def slope_weights(window_size):
+    # [TradeMaster] filtfilt (odd padding) and the least-squares slope are both linear in the window,
+    # so get_slope_window(window) == window @ w with w[i] = get_slope_window(e_i). Computed once per size.
+    return np.array([get_slope_window(pd.Series(e)) for e in np.eye(window_size)])
+
+
+def rolling_slope(close, window_size):
+    # [TradeMaster] replaces close.rolling(window_size).apply(get_slope_window): one butter/filtfilt/
+    # LinearRegression fit per row -> one dot product per row. Equal to ~1e-9 relative (float rounding).
+    close = np.asarray(close, dtype=np.float64)
+    out = np.full(len(close), np.nan)
+    if len(close) >= window_size:
+        windows = np.lib.stride_tricks.sliding_window_view(close, window_size)
+        out[window_size - 1:] = windows @ slope_weights(window_size)
+    return out
+
+
 def label_whole(df):
-    window_size_list = [360]
+    window_size_list = [CONTEXT_WINDOW]  # [TradeMaster] was [360]
     for i in range(len(window_size_list)):
         window_size = window_size_list[i]
-        df['slope_{}'.format(window_size)] = df['close'].rolling(window=window_size).apply(get_slope_window)
+        df['slope_{}'.format(window_size)] = rolling_slope(df['close'], window_size)  # [TradeMaster] was rolling().apply
         df['return'] = df['close'].pct_change().fillna(0)
         df['vol_{}'.format(window_size)] = df['return'].rolling(window=window_size).std()
     return df
 
 if __name__ == "__main__":
-    df_train = pd.read_feather('./data/ETHUSDT/df_train.feather')
-    df_val = pd.read_feather('./data/ETHUSDT/df_val.feather')
-    df_test = pd.read_feather('./data/ETHUSDT/df_test.feather')
+    df_train = pd.read_feather(os.path.join(DATA, 'df_train.feather'))
+    df_val = pd.read_feather(os.path.join(DATA, 'df_val.feather'))
+    df_test = pd.read_feather(os.path.join(DATA, 'df_test.feather'))
 
-    os.makedirs('./data/ETHUSDT/train', exist_ok=True)
-    os.makedirs('./data/ETHUSDT/val', exist_ok=True)
-    os.makedirs('./data/ETHUSDT/test', exist_ok=True)
-    os.makedirs('./data/ETHUSDT/whole', exist_ok=True)
+    os.makedirs(os.path.join(DATA, 'train'), exist_ok=True)
+    os.makedirs(os.path.join(DATA, 'val'), exist_ok=True)
+    os.makedirs(os.path.join(DATA, 'test'), exist_ok=True)
+    os.makedirs(os.path.join(DATA, 'whole'), exist_ok=True)
 
     chunk(df_train, df_val, df_test)
     label_slope(df_train, df_val, df_test)
@@ -186,9 +214,9 @@ if __name__ == "__main__":
     df_val = label_whole(df_val).dropna().reset_index(drop=True).iloc[1:].reset_index(drop=True)
     df_test = label_whole(df_test).dropna().reset_index(drop=True).iloc[1:].reset_index(drop=True)
 
-    df_train.to_feather('./data/ETHUSDT/whole/train.feather')
-    df_val.to_feather('./data/ETHUSDT/whole/val.feather')
-    df_test.to_feather('./data/ETHUSDT/whole/test.feather')
+    df_train.to_feather(os.path.join(DATA, 'whole', 'train.feather'))
+    df_val.to_feather(os.path.join(DATA, 'whole', 'val.feather'))
+    df_test.to_feather(os.path.join(DATA, 'whole', 'test.feather'))
 
 
     

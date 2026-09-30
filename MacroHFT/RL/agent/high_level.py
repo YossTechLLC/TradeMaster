@@ -1,3 +1,11 @@
+# [TradeMaster] thread caps must be set before numpy/torch are imported to take effect (upstream set
+# them after 'import torch'). TM_THREADS (default 1, the upstream intent) sets all of them; the BOX runs
+# many 1-thread processes side by side instead of one multi-threaded one.
+import os
+_THREADS = os.environ.get("TM_THREADS", "1")
+for _v in ("MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS", "OMP_NUM_THREADS"):
+    os.environ[_v] = _THREADS
+
 import pathlib
 import copy
 import sys
@@ -5,6 +13,7 @@ import random
 import argparse
 
 import torch
+torch.set_num_threads(int(_THREADS))  # [TradeMaster]
 import torch.nn as nn
 import torch.nn.functional as F
 import yaml
@@ -24,10 +33,7 @@ from MacroHFT.RL.util.utili import get_ada, get_epsilon, LinearDecaySchedule
 from MacroHFT.RL.util.replay_buffer import ReplayBuffer_High
 from MacroHFT.RL.util.memory import episodicmemory
 
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["NUMEXPR_NUM_THREADS"] = "1"
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["F_ENABLE_ONEDNN_OPTS"] = "0"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"  # [TradeMaster] was the typo F_ENABLE_ONEDNN_OPTS
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--buffer_size",type=int,default=1000000,)
@@ -52,6 +58,14 @@ parser.add_argument("--alpha",type=float,default=0.5)
 parser.add_argument("--beta",type=int,default=5)
 parser.add_argument("--exp",type=str,default="exp1")
 parser.add_argument("--num_step",type=int,default=10)
+# [TradeMaster] sub-agent checkpoints were hard-coded to result/low_level/ETHUSDT/best_model
+# [TradeMaster] bar-count constants (upstream: 1-minute bars), for coarser bars
+parser.add_argument("--context_window",type=int,default=360,
+                    help="window of the slope_<w>/vol_<w> context columns (decomposition.py MACRO_CONTEXT_WINDOW)")
+parser.add_argument("--memory_capacity",type=int,default=4320,
+                    help="episodic memory size in steps (also when re-encoding starts)")
+parser.add_argument("--subagent_path",type=str,default=None,
+                    help="dir with {slope,vol}/{1,2,3}/best_model.pkl (default: result/low_level/<dataset>/best_model)")
 
 
 def seed_torch(seed):
@@ -108,7 +122,14 @@ class DQN(object):
 
         self.tech_indicator_list = np.load('./data/feature_list/single_features.npy', allow_pickle=True).tolist()
         self.tech_indicator_list_trend = np.load('./data/feature_list/trend_features.npy', allow_pickle=True).tolist()
-        self.clf_list = ['slope_360', 'vol_360']
+        self.clf_list = ['slope_{}'.format(args.context_window), 'vol_{}'.format(args.context_window)]  # [TradeMaster] was *_360
+        # [TradeMaster] standardise the context features with train-split statistics: slope_360 is a raw price
+        # slope (scale of the price) and vol_360 ~1e-3, both fed unnormalised into hyperagent.fc2
+        clf_train = pd.read_feather(os.path.join(self.train_data_path, "train.feather"), columns=self.clf_list)
+        self.clf_mean = clf_train.mean().to_dict()
+        self.clf_std = {k: (v if v > 0 else 1.0) for k, v in clf_train.std().to_dict().items()}
+        with open(os.path.join(self.model_path, "clf_normalisation.yaml"), "w") as f:
+            yaml.safe_dump({"mean": self.clf_mean, "std": self.clf_std}, f)
 
         self.transcation_cost = args.transcation_cost
         self.back_time_length = args.back_time_length
@@ -127,16 +148,14 @@ class DQN(object):
             self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)
         self.vol_3 = subagent(
             self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)        
-        model_list_slope = [
-            "./result/low_level/ETHUSDT/best_model/slope/1/best_model.pkl", 
-            "./result/low_level/ETHUSDT/best_model/slope/2/best_model.pkl",
-            "./result/low_level/ETHUSDT/best_model/slope/3/best_model.pkl"
-        ]
-        model_list_vol = [
-            "./result/low_level/ETHUSDT/best_model/vol/1/best_model.pkl",
-            "./result/low_level/ETHUSDT/best_model/vol/2/best_model.pkl",
-            "./result/low_level/ETHUSDT/best_model/vol/3/best_model.pkl"
-        ]
+        # [TradeMaster] sub-agents come from --subagent_path (default: this dataset's best_model dir)
+        subagent_path = args.subagent_path or os.path.join("./result/low_level", args.dataset, "best_model")
+        model_list_slope = [os.path.join(subagent_path, "slope", str(i), "best_model.pkl") for i in (1, 2, 3)]
+        model_list_vol = [os.path.join(subagent_path, "vol", str(i), "best_model.pkl") for i in (1, 2, 3)]
+        missing = [p for p in model_list_slope + model_list_vol if not os.path.exists(p)]
+        if missing:
+            raise FileNotFoundError("sub-agent checkpoints missing (train them with ./run.sh train-low, "
+                                    "or pass --subagent_path): {}".format(missing))
         self.slope_1.load_state_dict(
             torch.load(model_list_slope[0], map_location=self.device))
         self.slope_2.load_state_dict(
@@ -155,6 +174,9 @@ class DQN(object):
         self.vol_1.eval()
         self.vol_2.eval()
         self.vol_3.eval()
+        # [TradeMaster] the sub-agents are frozen (only the hyper-agent is optimised): don't track their grads
+        for m in (self.slope_1, self.slope_2, self.slope_3, self.vol_1, self.vol_2, self.vol_3):
+            m.requires_grad_(False)
         self.slope_agents = {
             0: self.slope_1,
             1: self.slope_2,
@@ -183,7 +205,18 @@ class DQN(object):
         self.decay_length = args.decay_length
         self.epsilon_scheduler = LinearDecaySchedule(start_epsilon=self.epsilon_start, end_epsilon=self.epsilon_end, decay_length=self.decay_length)
         self.epsilon = args.epsilon_start
-        self.memory = episodicmemory(4320, 5, self.n_state_1, self.n_state_2, 64, self.device)
+        self.memory_capacity = args.memory_capacity  # [TradeMaster] was 4320
+        self.memory = episodicmemory(self.memory_capacity, 5, self.n_state_1, self.n_state_2, 64, self.device)
+        self.args = args  # [TradeMaster] methods used the module-global `args` (only worked as __main__)
+        self.alpha, self.beta = args.alpha, args.beta
+        self._q_cache = None  # [TradeMaster] see _q_values
+
+    def read_split(self, path):
+        # [TradeMaster] read a whole-split file with the context features standardised (see __init__)
+        df = pd.read_feather(path)
+        for c in self.clf_list:
+            df[c] = (df[c] - self.clf_mean[c]) / self.clf_std[c]
+        return df
 
     def calculate_q(self, w, qs):
         q_tensor = torch.stack(qs)
@@ -199,8 +232,9 @@ class DQN(object):
         batch = {k: v.to(self.device) for k, v in batch.items()}
         
         w_current = self.hyperagent(batch['state'], batch['state_trend'], batch['state_clf'], batch['previous_action'])
-        w_next = self.hyperagent_target(batch['next_state'], batch['next_state_trend'], batch['next_state_clf'], batch['next_previous_action'])
-        w_next_ = self.hyperagent(batch['next_state'], batch['next_state_trend'], batch['next_state_clf'], batch['next_previous_action'])
+        with torch.no_grad():  # [TradeMaster] target side: no graph needed (argmax / target net only)
+            w_next = self.hyperagent_target(batch['next_state'], batch['next_state_trend'], batch['next_state_clf'], batch['next_previous_action'])
+            w_next_ = self.hyperagent(batch['next_state'], batch['next_state_trend'], batch['next_state_clf'], batch['next_previous_action'])
 
 
         qs_current = [
@@ -211,19 +245,21 @@ class DQN(object):
                     self.vol_agents[1](batch['state'], batch['state_trend'], batch['previous_action']),
                     self.vol_agents[2](batch['state'], batch['state_trend'], batch['previous_action'])
         ]
-        qs_next = [
-                    self.slope_agents[0](batch['next_state'], batch['next_state_trend'], batch['next_previous_action']),
-                    self.slope_agents[1](batch['next_state'], batch['next_state_trend'], batch['next_previous_action']),
-                    self.slope_agents[2](batch['next_state'], batch['next_state_trend'], batch['next_previous_action']),
-                    self.vol_agents[0](batch['next_state'], batch['next_state_trend'], batch['next_previous_action']),
-                    self.vol_agents[1](batch['next_state'], batch['next_state_trend'], batch['next_previous_action']),
-                    self.vol_agents[2](batch['next_state'], batch['next_state_trend'], batch['next_previous_action'])
-        ]
+        with torch.no_grad():  # [TradeMaster]
+            qs_next = [
+                        self.slope_agents[0](batch['next_state'], batch['next_state_trend'], batch['next_previous_action']),
+                        self.slope_agents[1](batch['next_state'], batch['next_state_trend'], batch['next_previous_action']),
+                        self.slope_agents[2](batch['next_state'], batch['next_state_trend'], batch['next_previous_action']),
+                        self.vol_agents[0](batch['next_state'], batch['next_state_trend'], batch['next_previous_action']),
+                        self.vol_agents[1](batch['next_state'], batch['next_state_trend'], batch['next_previous_action']),
+                        self.vol_agents[2](batch['next_state'], batch['next_state_trend'], batch['next_previous_action'])
+            ]
         q_distribution = self.calculate_q(w_current, qs_current)
         q_current = q_distribution.gather(-1, batch['action']).squeeze(-1)
-        a_argmax = self.calculate_q(w_next_, qs_next).argmax(dim=-1, keepdim=True)
-        q_nexts = self.calculate_q(w_next, qs_next)
-        q_target = batch['reward'] + self.gamma * (1 - batch['terminal']) * q_nexts.gather(-1, a_argmax).squeeze(-1)
+        with torch.no_grad():  # [TradeMaster]
+            a_argmax = self.calculate_q(w_next_, qs_next).argmax(dim=-1, keepdim=True)
+            q_nexts = self.calculate_q(w_next, qs_next)
+            q_target = batch['reward'] + self.gamma * (1 - batch['terminal']) * q_nexts.gather(-1, a_argmax).squeeze(-1)
 
         td_error = self.loss_func(q_current, q_target)
         memory_error = self.loss_func(q_current, batch['q_memory'])
@@ -235,7 +271,7 @@ class DQN(object):
             reduction="batchmean",
         )
 
-        loss = td_error + args.alpha * memory_error + args.beta * KL_loss
+        loss = td_error + self.alpha * memory_error + self.beta * KL_loss  # [TradeMaster] was args.*
         self.optimizer.zero_grad()
         loss.backward()
 
@@ -246,14 +282,21 @@ class DQN(object):
         self.update_counter += 1
         return td_error.cpu(), memory_error.cpu(), KL_loss.cpu(), torch.mean(q_current.cpu()), torch.mean(q_target.cpu())
 
-    def act(self, state, state_trend, state_clf, info):
-        x1 = torch.FloatTensor(state).to(self.device)
-        x2 = torch.FloatTensor(state_trend).to(self.device)
-        x3 = torch.FloatTensor(state_clf).unsqueeze(0).to(self.device)
-        previous_action = torch.unsqueeze(
-            torch.tensor(info["previous_action"]).long().to(self.device),
-            0).to(self.device)
-        if np.random.uniform() < (1-self.epsilon):
+    def _q_values(self, state, state_trend, state_clf, info):
+        # [TradeMaster] one no-grad pass over the six sub-agents + hyper-agent (act/q_estimate built autograd
+        # graphs before). q_estimate(s_) and the next step's act(s_) get the very same inputs, so the result
+        # is reused as long as no update() has changed the weights in between.
+        c = self._q_cache
+        if (c is not None and c[0] is state and c[1] is state_trend and c[2] is state_clf
+                and c[3] == info["previous_action"] and c[4] == self.update_counter):
+            return c[5]
+        with torch.no_grad():
+            x1 = torch.FloatTensor(state).to(self.device)
+            x2 = torch.FloatTensor(state_trend).to(self.device)
+            x3 = torch.FloatTensor(state_clf).unsqueeze(0).to(self.device)
+            previous_action = torch.unsqueeze(
+                torch.tensor(info["previous_action"]).long().to(self.device),
+                0).to(self.device)
             qs = [
                     self.slope_agents[0](x1, x2, previous_action),
                     self.slope_agents[1](x1, x2, previous_action),
@@ -264,6 +307,12 @@ class DQN(object):
             ]
             w = self.hyperagent(x1, x2, x3, previous_action)
             actions_value = self.calculate_q(w, qs)
+        self._q_cache = (state, state_trend, state_clf, info["previous_action"], self.update_counter, actions_value)
+        return actions_value
+
+    def act(self, state, state_trend, state_clf, info):
+        if np.random.uniform() < (1-self.epsilon):
+            actions_value = self._q_values(state, state_trend, state_clf, info)  # [TradeMaster]
             action = torch.max(actions_value, 1)[1].data.cpu().numpy()
             action = action[0]
         else:
@@ -294,22 +343,7 @@ class DQN(object):
             return action
 
     def q_estimate(self, state, state_trend, state_clf, info):
-        x1 = torch.FloatTensor(state).to(self.device)
-        x2 = torch.FloatTensor(state_trend).to(self.device)
-        x3 = torch.FloatTensor(state_clf).unsqueeze(0).to(self.device)
-        previous_action = torch.unsqueeze(
-            torch.tensor(info["previous_action"]).long().to(self.device),
-            0).to(self.device)
-        qs = [
-                self.slope_agents[0](x1, x2, previous_action),
-                self.slope_agents[1](x1, x2, previous_action),
-                self.slope_agents[2](x1, x2, previous_action),
-                self.vol_agents[0](x1, x2, previous_action),
-                self.vol_agents[1](x1, x2, previous_action),
-                self.vol_agents[2](x1, x2, previous_action)
-        ]
-        w = self.hyperagent(x1, x2, x3, previous_action)
-        actions_value = self.calculate_q(w, qs)
+        actions_value = self._q_values(state, state_trend, state_clf, info)  # [TradeMaster]
         q = torch.max(actions_value, 1)[0].detach().cpu().numpy()
         
         return q
@@ -335,11 +369,12 @@ class DQN(object):
         epoch_counter = 0
         best_return_rate = -float('inf')
         best_model = None
-        self.replay_buffer = ReplayBuffer_High(args, self.n_state_1, self.n_state_2, self.n_action) 
+        self.replay_buffer = ReplayBuffer_High(self.args, self.n_state_1, self.n_state_2, self.n_action)  # [TradeMaster]
+        # [TradeMaster] read once (was re-read every epoch); the env never modifies it
+        train_df = self.read_split(os.path.join(self.train_data_path, "train.feather"))
         for sample in range(self.epoch_number):
             print('epoch ', epoch_counter + 1)
-            self.df = pd.read_feather(
-                os.path.join(self.train_data_path, "train.feather"))
+            self.df = train_df
             
             
             train_env = Training_Env(
@@ -400,7 +435,7 @@ class DQN(object):
                                 scalar_value=q_target,
                                 global_step=self.update_counter,
                                 walltime=None)
-                    if step_counter > 4320:
+                    if step_counter > self.memory_capacity:  # [TradeMaster] was 4320
                         self.memory.re_encode(self.hyperagent)
                 if done:
                     break
@@ -475,10 +510,14 @@ class DQN(object):
             epoch_final_balance_train_list = []
             epoch_required_money_train_list = []
             epoch_reward_sum_train_list = []
-        best_model_path = os.path.join("./result/high_level", 
-                                        '{}'.format(self.dataset), 'best_model.pkl')
+        if best_model is None:  # [TradeMaster] e.g. --epoch_number 0; never torch.save(None)
+            print("warning: no epoch was selected on validation; testing the current weights")
+            best_model = copy.deepcopy(self.hyperagent.state_dict())
+        # [TradeMaster] per exp/seed (was result/high_level/<dataset>/, shared by every run)
+        best_model_path = os.path.join(self.model_path, 'best_model.pkl')
         torch.save(best_model, best_model_path)  # [TradeMaster] best_model is already a state_dict
-        final_result_path = os.path.join("./result/high_level", '{}'.format(self.dataset))
+        final_result_path = os.path.join(self.model_path, 'test')
+        os.makedirs(final_result_path, exist_ok=True)
         self.test_cluster(best_model_path, final_result_path)
 
 
@@ -492,8 +531,8 @@ class DQN(object):
         final_balance_list = []
         required_money_list = []
         commission_fee_list = []
-        self.df = pd.read_feather(
-            os.path.join(self.val_data_path, "val.feather"))
+        self.df = self.read_split(
+            os.path.join(self.val_data_path, "val.feather"))  # [TradeMaster]
         
         val_env = Testing_Env(
                 df=self.df,
@@ -536,11 +575,17 @@ class DQN(object):
         np.save(os.path.join(save_path, "commission_fee_history_val.npy"),
                 commission_fee_list)
         return_rate = final_balance / required_money
+        # [TradeMaster] an agent that never buys has required_money == 0 -> nan/inf; score it as 0
+        # (nan never beat the best score, so best_model stayed None and the final test crashed)
+        if not np.isfinite(return_rate):
+            return_rate = 0.0
         return return_rate
 
     def test_cluster(self, epoch_path, save_path):
+        # [TradeMaster] train() passes the best_model.pkl file itself, not an epoch directory
+        model_file = epoch_path if epoch_path.endswith(".pkl") else os.path.join(epoch_path, "trained_model.pkl")
         self.hyperagent.load_state_dict(
-            torch.load(os.path.join(epoch_path, "trained_model.pkl")))
+            torch.load(model_file))
         self.hyperagent.eval()
         counter = False
         action_list = []
@@ -548,8 +593,8 @@ class DQN(object):
         final_balance_list = []
         required_money_list = []
         commission_fee_list = []
-        self.df = pd.read_feather(
-            os.path.join(self.test_data_path, "test.feather"))
+        self.df = self.read_split(
+            os.path.join(self.test_data_path, "test.feather"))  # [TradeMaster]
         
         test_env = Testing_Env(
                 df=self.df,

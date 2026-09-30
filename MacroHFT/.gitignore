@@ -1,4 +1,8 @@
-data/ETHUSDT
+data/*
+!data/feature_list/
 logs/
 **/__pycache__/
 result/high_level
+# per-dataset sub-agent runs; only the shipped ETHUSDT checkpoints are tracked
+result/low_level/*
+!result/low_level/ETHUSDT/

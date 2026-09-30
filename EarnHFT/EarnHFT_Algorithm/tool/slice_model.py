@@ -5,6 +5,8 @@ from pathlib import Path
 ROOT = str(Path(__file__).resolve().parents[3])
 sys.path.append(ROOT)
 import pandas as pd
+import numpy as np
+import shutil
 import argparse
 from pathlib import Path
 import warnings
@@ -182,26 +184,28 @@ class Linear_Market_Dynamics_Model(object):
         # elif extension == "feather":
         #     merged_data.to_feather(process_datafile_path)
         print("labeling done")
-        if not os.path.exists(os.path.join(ticker_name_path, "valid")):
-            os.makedirs(os.path.join(ticker_name_path, "valid"))
+        # [TradeMaster] (1) re-running used to fail on os.makedirs (FileExistsError); segments from an
+        # earlier run are removed so no stale df_<n>.feather survives. (2) The loop below only wrote a
+        # segment when the label changed, so the last segment of the valid set was never written.
+        # (3) Segment boundaries come from one vectorised comparison instead of a Python loop over rows.
+        valid_dir = os.path.join(ticker_name_path, "valid")
+        if os.path.isdir(valid_dir):
+            shutil.rmtree(valid_dir)
         for i in range(self.dynamic_number):
-            os.makedirs(os.path.join(ticker_name_path, "valid", "label_{}".format(i)))
-        previous_label = merged_data.label[0]
-        previous_start = 0
+            os.makedirs(os.path.join(valid_dir, "label_{}".format(i)))
+        labels = merged_data["label"].to_numpy()
+        if pd.isna(labels).any():
+            raise ValueError("{} rows of the valid set got no market-dynamics label".format(int(pd.isna(labels).sum())))
+        labels = labels.astype(int)
+        bounds = np.concatenate([[0], np.flatnonzero(labels[1:] != labels[:-1]) + 1, [len(labels)]])
         label_counter = [0] * self.dynamic_number
-        for i in range(len(merged_data)):
-            if merged_data.label[i] != previous_label:
-                merged_data.iloc[previous_start:i].reset_index(drop=True).to_feather(
-                    os.path.join(
-                        ticker_name_path,
-                        "valid",
-                        "label_{}".format(previous_label),
-                        "df_{}.feather".format(label_counter[previous_label]),
-                    )
-                )
-                label_counter[previous_label] += 1
-                previous_start = i
-                previous_label = merged_data.label[i]
+        for start, end in zip(bounds[:-1], bounds[1:]):
+            label = labels[start]
+            merged_data.iloc[start:end].reset_index(drop=True).to_feather(
+                os.path.join(valid_dir, "label_{}".format(label), "df_{}.feather".format(label_counter[label]))
+            )
+            label_counter[label] += 1
+        print("segments per label:", label_counter)
 
         # print("plotting start")
         # # a list the path to all the modeling visulizations

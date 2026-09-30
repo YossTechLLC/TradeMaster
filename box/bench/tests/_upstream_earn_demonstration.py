@@ -188,26 +188,6 @@ def make_q_table(df: pd.DataFrame,
     return q_table
 
 
-def _walk_book(prices, sizes, position, punish, max_punish):
-    # [TradeMaster] vectorised over all rows: the upstream per-row level walk of sell_value/buy_value
-    # (levels 1-4 are consumed; reaching level 5 with volume left is punished), same float ops in the same order
-    pos = np.full(len(prices[0]), position, dtype=np.float64)
-    value = np.zeros(len(prices[0]))
-    done = np.zeros(len(prices[0]), dtype=bool)
-    for level in range(4):
-        stop = ~done & (pos <= sizes[level])
-        value[stop] = value[stop] + prices[level][stop] * pos[stop]
-        done |= stop
-        go = ~done
-        pos[go] = pos[go] - sizes[level][go]
-        value[go] = value[go] + prices[level][go] * sizes[level][go]
-    left = ~done & (pos > 1e-12)
-    value[left] = value[left] + punish * max_punish
-    fill = ~done & ~left
-    value[fill] = value[fill] + prices[4][fill] * pos[fill]
-    return value
-
-
 def make_q_table_reward(df: pd.DataFrame,
                         num_action,
                         max_holding,
@@ -215,54 +195,96 @@ def make_q_table_reward(df: pd.DataFrame,
                         gamma=0.999,
                         commission_fee=0.000175,
                         max_punish=1e12):
-    # [TradeMaster] vectorised rewrite of the upstream loop (two df.iloc rows + a 5x5 Python loop per row,
-    # ~0.5 ms/row, run twice per training sample). Rewards for all rows are built with numpy in the same
-    # float-operation order, then the backward recursion runs over numpy rows: the table is bit-identical
-    # to upstream (box/bench/tests/test_q_tables.py; upstream copy in box/bench/tests/_upstream_earn_demonstration.py).
     q_table = np.zeros((len(df), num_action, num_action))
-    if len(df) < 2:
-        return q_table
-    cur = slice(0, len(df) - 1)  # row i: prices at i (trade), bid1 at i + 1 (valuation)
-    bid_p = [df["bid{}_price".format(i)].to_numpy(dtype=np.float64)[cur] for i in range(1, 6)]
-    bid_s = [df["bid{}_size".format(i)].to_numpy(dtype=np.float64)[cur] for i in range(1, 6)]
-    ask_p = [df["ask{}_price".format(i)].to_numpy(dtype=np.float64)[cur] for i in range(1, 6)]
-    ask_s = [df["ask{}_size".format(i)].to_numpy(dtype=np.float64)[cur] for i in range(1, 6)]
-    current_bid1 = bid_p[0]
-    future_bid1 = df["bid1_price"].to_numpy(dtype=np.float64)[1:]
 
-    def sell_value(position):
-        return _walk_book(bid_p, bid_s, position, -1, max_punish) * (1 - commission_fee)
+    # time * previous_action*current_action
+    def sell_value(price_information, position):
+        # use bid price and size to evaluate
+        value = 0
+        # position 表示剩余的单量
+        for i in range(1, 6):
+            if position <= price_information["bid{}_size".format(i)] or i == 5:
+                break
+            else:
+                position -= price_information["bid{}_size".format(i)]
+                value += price_information["bid{}_price".format(
+                    i)] * price_information["bid{}_size".format(i)]
+        if position > 1e-12 and i == 5:
+            value = value - max_punish
+            # 执行的单量
+        else:
+            value += price_information["bid{}_price".format(i)] * position
+        # 卖的时候的手续费相当于少卖钱了
+        return value * (1 - commission_fee)
 
-    def buy_value(position):
-        return _walk_book(ask_p, ask_s, position, +1, max_punish) * (1 + commission_fee)
+    def calculate_value(price_information, position):
+        return price_information["bid1_price"] * position
+
+    def buy_value(price_information, position):
+        # this value measure how much
+        value = 0
+        for i in range(1, 6):
+            if position <= price_information["ask{}_size".format(i)] or i == 5:
+                break
+            else:
+                position -= price_information["ask{}_size".format(i)]
+                value += price_information["ask{}_price".format(
+                    i)] * price_information["ask{}_size".format(i)]
+        if i == 5 and position > 1e-12:
+            value = value + max_punish
+        else:
+            value += price_information["ask{}_price".format(i)] * position
+        # 买的时候相当于多花钱买了
+
+        return value * (1 + commission_fee)
 
     scale_factor = num_action - 1
-    reward = np.empty((len(df) - 1, num_action, num_action))
-    walks = {}
-    for previous_action in range(num_action):
-        for current_action in range(num_action):
-            previous_position = previous_action / (scale_factor) * max_holding
-            current_position = current_action / (scale_factor) * max_holding
-            current_value = current_bid1 * previous_position
-            future_value = future_bid1 * current_position
-            if current_action > previous_action:
-                position_change = (current_action-previous_action) / \
-                    scale_factor*max_holding
-                key = ("buy", position_change)
-                if key not in walks:
-                    walks[key] = buy_value(position_change)
-                r = future_value - (current_value + walks[key])
-            else:
-                position_change = (previous_action-current_action) / \
-                    scale_factor*max_holding
-                key = ("sell", position_change)
-                if key not in walks:
-                    walks[key] = sell_value(position_change)
-                r = future_value + walks[key] - current_value
-            reward[:, previous_action, current_action] = reward_scale * r
+    # calculate the Q_value in timestamp t-1 (starting from 0)
 
-    for i in range(len(df) - 2, -1, -1):
-        q_table[i] = reward[i] + gamma * q_table[i + 1].max(axis=1)
+    # 从后往前倒更新q值
+    #TODO 更改reward的而不是单纯追求现金流
+    for t in range(2, len(df) + 1):
+        current_price_information = df.iloc[-t]
+        future_price_information = df.iloc[-t + 1]
+        for previous_action in range(num_action):
+            for current_action in range(num_action):
+                #the future_position is the current action
+                if current_action > previous_action:
+                    previous_position = previous_action / (
+                        scale_factor) * max_holding
+                    current_position = current_action / (
+                        scale_factor) * max_holding
+                    position_change = (current_action-previous_action) / \
+                        scale_factor*max_holding
+                    buy_money = buy_value(current_price_information,
+                                          position_change)
+                    current_value = calculate_value(current_price_information,
+                                                    previous_position)
+                    future_value = calculate_value(future_price_information,
+                                                   current_position)
+                    reward = future_value - (current_value + buy_money)
+                    reward = reward_scale * reward
+                    q_table[len(df) - t][previous_action][
+                        current_action] = reward + gamma * np.max(
+                            q_table[len(df) - t + 1][current_action][:])
+                else:
+                    previous_position = previous_action / (
+                        scale_factor) * max_holding
+                    current_position = current_action / (
+                        scale_factor) * max_holding
+                    position_change = (previous_action-current_action) / \
+                        scale_factor*max_holding
+                    sell_money = sell_value(current_price_information,
+                                            position_change)
+                    current_value = calculate_value(current_price_information,
+                                                    previous_position)
+                    future_value = calculate_value(future_price_information,
+                                                   current_position)
+                    reward = future_value + sell_money - current_value
+                    reward = reward_scale * reward
+                    q_table[len(df) - t][previous_action][
+                        current_action] = reward + gamma * np.max(
+                            q_table[len(df) - t + 1][current_action][:])
     return q_table
 
 

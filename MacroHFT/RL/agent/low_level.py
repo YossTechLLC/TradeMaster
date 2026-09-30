@@ -1,3 +1,11 @@
+# [TradeMaster] thread caps must be set before numpy/torch are imported to take effect (upstream set
+# them after 'import torch'). TM_THREADS (default 1, the upstream intent) sets all of them; the BOX runs
+# many 1-thread processes side by side instead of one multi-threaded one.
+import os
+_THREADS = os.environ.get("TM_THREADS", "1")
+for _v in ("MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS", "OMP_NUM_THREADS"):
+    os.environ[_v] = _THREADS
+
 import pathlib
 import copy
 import sys
@@ -5,6 +13,7 @@ import random
 import argparse
 
 import torch
+torch.set_num_threads(int(_THREADS))  # [TradeMaster]
 import torch.nn as nn
 import torch.nn.functional as F
 import yaml
@@ -23,10 +32,7 @@ from MacroHFT.env.low_level_env import Testing_Env, Training_Env
 from MacroHFT.RL.util.utili import get_ada, get_epsilon, LinearDecaySchedule
 from MacroHFT.RL.util.replay_buffer import ReplayBuffer
 
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["NUMEXPR_NUM_THREADS"] = "1"
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["F_ENABLE_ONEDNN_OPTS"] = "0"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"  # [TradeMaster] was the typo F_ENABLE_ONEDNN_OPTS
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--buffer_size",type=int,default=1000000,)
@@ -154,14 +160,17 @@ class DQN(object):
         self.decay_length = args.decay_length
         self.epsilon_scheduler = LinearDecaySchedule(start_epsilon=self.epsilon_start, end_epsilon=self.epsilon_end, decay_length=self.decay_length)
         self.epsilon = args.epsilon_start
+        self.args = args  # [TradeMaster] methods used the module-global `args` (only worked as __main__)
+        self.alpha = args.alpha
 
     def update(self, replay_buffer):
         self.eval_net.train()
         batch, _, _ = replay_buffer.sample()
         batch = {k: v.to(self.device) for k, v in batch.items()}
-        a_argmax = self.eval_net(batch['next_state'], batch['next_state_trend'], batch['next_previous_action']).argmax(dim=-1, keepdim=True)
-        q_target = batch['reward'] + self.gamma * (1 - batch['terminal']) * self.target_net(batch['next_state'], batch['next_state_trend'], 
-                                                    batch['next_previous_action']).gather(-1, a_argmax).squeeze(-1)
+        with torch.no_grad():  # [TradeMaster] target side needs no graph
+            a_argmax = self.eval_net(batch['next_state'], batch['next_state_trend'], batch['next_previous_action']).argmax(dim=-1, keepdim=True)
+            q_target = batch['reward'] + self.gamma * (1 - batch['terminal']) * self.target_net(batch['next_state'], batch['next_state_trend'], 
+                                                        batch['next_previous_action']).gather(-1, a_argmax).squeeze(-1)
 
         q_distribution = self.eval_net(batch['state'], batch['state_trend'], batch['previous_action'])
         q_current = q_distribution.gather(-1, batch['action']).squeeze(-1)
@@ -175,7 +184,7 @@ class DQN(object):
             reduction="batchmean",
         )
 
-        alpha = args.alpha
+        alpha = self.alpha  # [TradeMaster]
         loss = td_error + alpha * KL_loss
         self.optimizer.zero_grad()
         loss.backward()
@@ -200,7 +209,8 @@ class DQN(object):
             torch.tensor(info["previous_action"]).long().to(self.device),
             0).to(self.device)
         if np.random.uniform() < (1-self.epsilon):
-            actions_value = self.eval_net(x1, x2, previous_action)
+            with torch.no_grad():  # [TradeMaster]
+                actions_value = self.eval_net(x1, x2, previous_action)
             action = torch.max(actions_value, 1)[1].data.cpu().numpy()
             action = action[0]
         else:
@@ -213,7 +223,8 @@ class DQN(object):
         x2 = torch.FloatTensor(state_trend).to(self.device)
         previous_action = torch.unsqueeze(
             torch.tensor(info["previous_action"]).long(), 0).to(self.device)
-        actions_value = self.eval_net(x1, x2, previous_action)
+        with torch.no_grad():  # [TradeMaster]
+            actions_value = self.eval_net(x1, x2, previous_action)
         action = torch.max(actions_value, 1)[1].data.cpu().numpy()
         action = action[0]
         return action
@@ -228,7 +239,7 @@ class DQN(object):
         step_counter = 0
         episode_counter = 0
         epoch_counter = 0        
-        self.replay_buffer = ReplayBuffer(args, self.n_state_1, self.n_state_2, self.n_action)   
+        self.replay_buffer = ReplayBuffer(self.args, self.n_state_1, self.n_state_2, self.n_action)  # [TradeMaster]
         best_return_rate = -float('inf')
         best_model = None
         for sample in range(self.epoch_number):
@@ -359,7 +370,12 @@ class DQN(object):
             return_rate_0 = self.val_cluster(epoch_path, val_path, 0)
             return_rate_1 = self.val_cluster(epoch_path, val_path, 1)
             return_rate_eval = (return_rate_0 + return_rate_1) / 2
-            if return_rate_eval > best_return_rate:
+            if best_model is None and not np.isfinite(return_rate_eval):
+                # [TradeMaster] no validation chunk carries this label (the mean over zero chunks is nan):
+                # nan never beats the best score, so best_model stayed None and None was saved as the checkpoint
+                print("warning: no validation chunks for label {}; keeping the latest epoch".format(self.label))
+                best_model = copy.deepcopy(self.eval_net.state_dict())
+            elif return_rate_eval > best_return_rate:
                 best_return_rate = return_rate_eval
                 best_model = copy.deepcopy(self.eval_net.state_dict())  # [TradeMaster] snapshot, not a live reference
                 print("best model updated to epoch ", epoch_counter)

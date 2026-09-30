@@ -139,7 +139,7 @@ def create_features_trade_second(df: pd.DataFrame, beat_fee, windows):
     df["ksft_s"] = (2 * df["close_s"] - df["high_s"] - df["low_s"])
     df["ksft2_s"] = (2 * df["close_s"] - df["high_s"] -
                      df["low_s"]) / (df["high_s"] - df["low_s"] + EPS)
-    df.drop(columns=["max_oc_s", "min_oc_s"])
+    df = df.drop(columns=["max_oc_s", "min_oc_s"])  # [TradeMaster] result was discarded, so these price levels stayed
     for w in windows:
         close_rolling = df["close_s"].rolling(w)
         low_rolling = df["low_s"].rolling(w)
@@ -173,12 +173,15 @@ def create_features_trade_second(df: pd.DataFrame, beat_fee, windows):
         df["rsv_{}_s".format(w)] = (df["close_s"] - low_rolling.min()) / (
             (high_rolling.max() - low_rolling.min()) + EPS)
 
-        df["imax_{}_s".format(w)] = high_rolling.apply(np.argmax) / w
+        # [TradeMaster] raw=True (ndarray windows, no Series per window) and each argmax/argmin computed
+        # once (imxd recomputed both); same values: windows with NaN are skipped by min_periods either way
+        imax = high_rolling.apply(np.argmax, raw=True)
+        imin = low_rolling.apply(np.argmin, raw=True)
+        df["imax_{}_s".format(w)] = imax / w
 
-        df["imin_{}_s".format(w)] = low_rolling.apply(np.argmin) / w
+        df["imin_{}_s".format(w)] = imin / w
 
-        df["imxd_{}_s".format(w)] = (high_rolling.apply(np.argmax) -
-                                     low_rolling.apply(np.argmin)) / w
+        df["imxd_{}_s".format(w)] = (imax - imin) / w
         df["imxd_{}_dis_s".format(w)] = (df["imxd_{}_s".format(w)] >
                                          0).astype('int')
     df = df.iloc[max(windows):].reset_index(drop=True)
@@ -202,7 +205,7 @@ def create_features_trade_minitue(df: pd.DataFrame, beat_fee, windows):
     df["ksft_m"] = (2 * df["close_m"] - df["high_m"] - df["low_m"])
     df["ksft2_m"] = (2 * df["close_m"] - df["high_m"] -
                      df["low_m"]) / (df["high_m"] - df["low_m"] + EPS)
-    df.drop(columns=["max_oc_m", "min_oc_m"])
+    df = df.drop(columns=["max_oc_m", "min_oc_m"])  # [TradeMaster] result was discarded
     for w in windows:
         close_rolling = df["close_m"].rolling(w)
         low_rolling = df["low_m"].rolling(w)
@@ -213,7 +216,8 @@ def create_features_trade_minitue(df: pd.DataFrame, beat_fee, windows):
 
         df["std_{}_close_m".format(w)] = close_rolling.std() / df["close_m"]
         df["std_{}_m".format(w)] = close_rolling.std() + EPS
-        df["ma_{}_m".format(w)] = (close_rolling.std() -
+        # [TradeMaster] was (std - close) / std: the moving average is the mean, as in ma_<w>_s
+        df["ma_{}_m".format(w)] = (close_rolling.mean() -
                                    df["close_m"]) / (close_rolling.std() + EPS)
         df["roc_{}_m".format(
             w)] = (close_shift - df["close_m"]) / (close_rolling.std() + EPS)
@@ -237,12 +241,13 @@ def create_features_trade_minitue(df: pd.DataFrame, beat_fee, windows):
         df["rsv_{}_m".format(w)] = (df["close_m"] - low_rolling.min()) / (
             (high_rolling.max() - low_rolling.min()) + EPS)
 
-        df["imax_{}_m".format(w)] = high_rolling.apply(np.argmax) / w
+        imax = high_rolling.apply(np.argmax, raw=True)  # [TradeMaster] see create_features_trade_second
+        imin = low_rolling.apply(np.argmin, raw=True)
+        df["imax_{}_m".format(w)] = imax / w
 
-        df["imin_{}_m".format(w)] = low_rolling.apply(np.argmin) / w
+        df["imin_{}_m".format(w)] = imin / w
 
-        df["imxd_{}_m".format(w)] = (high_rolling.apply(np.argmax) -
-                                     low_rolling.apply(np.argmin)) / w
+        df["imxd_{}_m".format(w)] = (imax - imin) / w
         df["imxd_{}_dis_m".format(w)] = (df["imxd_{}_m".format(w)] >
                                          0).astype('int')
     df = df.iloc[max(windows):].reset_index(drop=True)

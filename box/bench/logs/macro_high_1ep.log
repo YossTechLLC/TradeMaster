@@ -1,0 +1,20 @@
+1790722148.075 Namespace(buffer_size=1000000, dataset='BTCUSDT', q_value_memorize_freq=10, batch_size=512, eval_update_freq=512, lr=0.0001, epsilon_start=0.7, epsilon_end=0.3, decay_length=5, update_times=10, gamma=0.99, tau=0.005, transcation_cost=0.0002, back_time_length=1, seed=12345, n_step=1, epoch_number=1, device='cpu', alpha=0.5, beta=5, exp='exp1', num_step=10)
+1790722148.082 epoch  1
+1790722540.911 the portfit margine is  -0.7355816415316975
+1790722550.250 the portfit margine is  0.05186443549284691
+1790722550.274 Traceback (most recent call last):
+1790722550.274   File "/home/chad/TradeMaster/MacroHFT/RL/agent/high_level.py", line 602, in <module>
+1790722550.274     agent.train()
+1790722550.274   File "/home/chad/TradeMaster/MacroHFT/RL/agent/high_level.py", line 482, in train
+1790722550.274     self.test_cluster(best_model_path, final_result_path)
+1790722550.274   File "/home/chad/TradeMaster/MacroHFT/RL/agent/high_level.py", line 543, in test_cluster
+1790722550.274     torch.load(os.path.join(epoch_path, "trained_model.pkl")))
+1790722550.274   File "/home/chad/TradeMaster/.venv-hft/lib/python3.10/site-packages/torch/serialization.py", line 791, in load
+1790722550.274     with _open_file_like(f, 'rb') as opened_file:
+1790722550.274   File "/home/chad/TradeMaster/.venv-hft/lib/python3.10/site-packages/torch/serialization.py", line 271, in _open_file_like
+1790722550.274     return _open_file(name_or_buffer, mode)
+1790722550.274   File "/home/chad/TradeMaster/.venv-hft/lib/python3.10/site-packages/torch/serialization.py", line 252, in __init__
+1790722550.274     super().__init__(open(name, mode))
+1790722550.274 NotADirectoryError: [Errno 20] Not a directory: './result/high_level/BTCUSDT/best_model.pkl/trained_model.pkl'
+1790722550.509 Command exited with non-zero status 1
+1790722550.509 WALL 403.10 s  MAXRSS 518132 KB

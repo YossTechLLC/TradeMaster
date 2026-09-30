@@ -11,6 +11,8 @@ import sys
 
 # 由于在for循环中 np计算会存有一点点剩余 导致剩余的position不全是0 进而导致出现买不全的现象
 sys.path.append(".")
+# [TradeMaster] per-pair feature lists: run.sh points EARNHFT_FEATURE_DIR at data/feature/<PAIR>
+FEATURE_DIR = os.environ.get("EARNHFT_FEATURE_DIR", "data/feature")
 from RL.util.graph import get_test_contrast_curve_high_level
 from tool.demonstration import (
     making_multi_level_dp_demonstration,
@@ -22,8 +24,8 @@ import math
 from env.low_level_env import Testing_env
 from model.net import Qnet
 
-high_level_tech_indicator_list = np.load("data/feature/minitue_feature.npy").tolist()
-low_level_tech_indicator_list = np.load("data/feature/second_feature.npy").tolist()
+high_level_tech_indicator_list = np.load(os.path.join(FEATURE_DIR, "minitue_feature.npy")).tolist()
+low_level_tech_indicator_list = np.load(os.path.join(FEATURE_DIR, "second_feature.npy")).tolist()
 
 # tech_indicator_list=0
 transcation_cost = 0.00
@@ -131,25 +133,39 @@ class high_level_testing_env(Testing_env):
         self.timestamp_history = []
         self.macro_state_history = []
         self.macro_reward_history=[]
+        # [TradeMaster] pre-extract the minute-level state and the "last second of the minute" flags
+        # (step() read self.data.iloc[-1].timestamp and self.data[minute features] every second)
+        self._minute_features = self.df[self.high_llevel_tech_inidcator_list].to_numpy()
+        self._timestamps = pd.DatetimeIndex(self.df["timestamp"])
+        self._second_59 = np.asarray(self._timestamps.second == 59)
         #log for model 
         self.chosen_model_history=[]
 
     def reset(self):
         self.macro_action_history = []
         self.timestamp_history = []
+        # [TradeMaster] these grew by one entry per second across resets (1-2 GB over a router run)
+        self.macro_state_history = []
+        self.macro_reward_history = []
         self.state, self.info = super(high_level_testing_env, self).reset()
-        high_level_state = self.data[self.high_llevel_tech_inidcator_list].values
+        high_level_state = self._minute_features[self.day - self.stack_length:self.day]  # [TradeMaster]
         self.info["high_level_state"] = high_level_state
         self.chosen_model_history=[]
         
         return self.state, self.info
 
+    def position_index(self):
+        # [TradeMaster] int() of the float ratio truncated 0.9999999 to 0 (e.g. ETHUSDT max_hold 0.1: 4 -> 1 left
+        # 0.024999999999999994), so the router used the pool of the wrong position; tolerate float drift.
+        # Off-grid positions (partial fills) still map to the level below, as before.
+        return int(self.position / (self.max_holding_number / (self.action_dim - 1)) + 1e-9)
+
     def step(self, action):
-        self.chosen_model = self.low_level_agent_list_dict[int(self.position/(self.max_holding_number/(self.action_dim-1)))][action]
-        self.chosen_model_history.append(int(self.position/(self.max_holding_number/(self.action_dim-1)))*5+action)
+        self.chosen_model = self.low_level_agent_list_dict[self.position_index()][action]
+        self.chosen_model_history.append(self.position_index()*5+action)
         reward_mintue = 0
-        while self.data.iloc[-1].timestamp.second != 59 and self.terminal == False:
-            self.timestamp_history.append(self.data.iloc[-1].timestamp)
+        while not self._second_59[self.day - 1] and self.terminal == False:  # [TradeMaster] arrays
+            self.timestamp_history.append(self._timestamps[self.day - 1])
             self.macro_state_history.append(self.state)
             macro_action = self.pose_macro_action(self.state, self.info)
             self.macro_action_history.append(macro_action)
@@ -159,9 +175,11 @@ class high_level_testing_env(Testing_env):
             self.macro_reward_history.append(reward)
             reward_mintue += reward
         if self.terminal == True:
+            # [TradeMaster] provide the router state on the terminal step too, so the transition can be stored
+            self.info["high_level_state"] = self._minute_features[self.day - self.stack_length:self.day]
             return self.state, reward_mintue, done, self.info
         else:
-            self.timestamp_history.append(self.data.iloc[-1].timestamp)
+            self.timestamp_history.append(self._timestamps[self.day - 1])
             self.macro_state_history.append(self.state)
             macro_action = self.pose_macro_action(self.state, self.info)
             self.macro_action_history.append(macro_action)
@@ -170,11 +188,10 @@ class high_level_testing_env(Testing_env):
             ).step(macro_action)
             self.macro_reward_history.append(reward)
             reward_mintue += reward
-            self.info["high_level_state"] = self.data[
-                self.high_llevel_tech_inidcator_list
-            ].values
+            self.info["high_level_state"] = self._minute_features[self.day - self.stack_length:self.day]
         return self.state, reward_mintue, done, self.info
 
+    @torch.no_grad()  # [TradeMaster] inference only (built an autograd graph every second)
     def pose_macro_action(self, state, info):
         x = torch.unsqueeze(torch.FloatTensor(state).reshape(-1), 0).to(self.device)
         previous_action = torch.unsqueeze(

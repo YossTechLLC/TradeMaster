@@ -10,16 +10,33 @@ import torch
 import sys
 #由于在for循环中 np计算会存有一点点剩余 导致剩余的position不全是0 进而导致出现买不全的现象
 sys.path.append(".")
+# [TradeMaster] per-pair feature lists: run.sh points EARNHFT_FEATURE_DIR at data/feature/<PAIR>
+FEATURE_DIR = os.environ.get("EARNHFT_FEATURE_DIR", "data/feature")
 
 from tool.demonstration import making_multi_level_dp_demonstration, make_q_table, get_dp_action_from_qtable, make_q_table_reward
 import math
 
-tech_indicator_list = np.load("data/feature/second_feature.npy").tolist()
+tech_indicator_list = np.load(os.path.join(FEATURE_DIR, "second_feature.npy")).tolist()
 # tech_indicator_list=0
 transcation_cost = 0.00
 back_time_length = 1
 max_holding_number = 0.01
 action_dim = 5
+
+
+BOOK_COLUMNS = ["{}{}_{}".format(side, i, kind) for side in ("bid", "ask") for i in range(1, 6) for kind in ("price", "size")]
+
+
+class _PriceRow(object):
+    # [TradeMaster] read-only stand-in for the df.iloc[t] row Series that sell_value/buy_value/
+    # calculate_value index by column name; backed by the arrays pre-extracted in Testing_env.__init__
+    __slots__ = ("_cols", "_t")
+
+    def __init__(self, cols, t):
+        self._cols, self._t = cols, t
+
+    def __getitem__(self, key):
+        return self._cols[key][self._t]
 
 
 class Testing_env(gym.Env):
@@ -43,8 +60,14 @@ class Testing_env(gym.Env):
         self.terminal = False
         self.stack_length = back_time_length
         self.day = back_time_length
-        self.data = self.df.iloc[self.day - self.stack_length:self.day]
-        self.state = self.data[self.tech_indicator_list].values
+        # [TradeMaster] pre-extract what step() reads (was df.iloc slices + column selection every step)
+        self._features = self.df[self.tech_indicator_list].to_numpy()
+        self._book = {c: self.df[c].to_numpy() for c in BOOK_COLUMNS}
+        # max size fillable through levels 1-4, summed in the same order as np.sum over the row
+        self._buy_size_max = ((self._book["ask1_size"] + self._book["ask2_size"]) + self._book["ask3_size"]) + self._book["ask4_size"]
+        self._sell_size_max = ((self._book["bid1_size"] + self._book["bid2_size"]) + self._book["bid3_size"]) + self._book["bid4_size"]
+        self._n_rows = len(self.df.index.unique())
+        self.state = self._features[self.day - self.stack_length:self.day]
         self.initial_reward = 0
         self.reward_history = [self.initial_reward]
         self.previous_action = 0
@@ -112,23 +135,29 @@ class Testing_env(gym.Env):
     def calculate_value(self, price_information, position):
         return price_information["bid1_price"] * position
 
+    @property
+    def data(self):
+        # [TradeMaster] the current window as a DataFrame, for code outside the hot path
+        return self.df.iloc[self.day - self.stack_length:self.day]
+
+    def _row(self, t):
+        return _PriceRow(self._book, t)  # [TradeMaster]
+
     def calculate_avaliable_action(self, price_information):
         # 这块计算跟粒度有关系 修改粒度时应该注意
-        buy_size_max = np.sum(price_information[[
-            "ask1_size", "ask2_size", "ask3_size", "ask4_size"
-        ]])
-        sell_size_max = np.sum(price_information[[
-            "bid1_size", "bid2_size", "bid3_size", "bid4_size"
-        ]])
+        # [TradeMaster] level 1-4 sums pre-computed per row
+        buy_size_max = self._buy_size_max[price_information._t]
+        sell_size_max = self._sell_size_max[price_information._t]
         position_upper = self.position + buy_size_max
         position_lower = self.position - sell_size_max
         position_lower = max(position_lower, 0)
         position_upper = min(position_upper, self.max_holding_number)
         # transfer the position back into our action
+        # [TradeMaster] + 1e-9: float drift (0.9999999 -> 0) made int() drop a whole position level
         current_action = int(self.position * (self.action_dim - 1) /
-                             self.max_holding_number)
+                             self.max_holding_number + 1e-9)
         action_upper = int(position_upper * (self.action_dim - 1) /
-                           self.max_holding_number)
+                           self.max_holding_number + 1e-9)
         if position_lower == 0:
             action_lower = 0
         else:
@@ -150,24 +179,25 @@ class Testing_env(gym.Env):
     def reset(self):
         self.terminal = False
         self.day = self.stack_length
-        self.data = self.df.iloc[self.day - self.stack_length:self.day]
-        self.state = self.data[self.tech_indicator_list].values
+        self.state = self._features[self.day - self.stack_length:self.day]
         self.initial_reward = 0
         self.reward_history = [self.initial_reward]
         self.previous_action = 0
-        price_information = self.data.iloc[-1]
+        price_information = self._row(self.day - 1)
         self.needed_money_memory = []
         self.sell_money_memory = []
         self.comission_fee_history = []
-        avaliable_discriminator = self.calculate_avaliable_action(
-            price_information)
         self.previous_position = self.initial_action * self.max_holding_number / (
             self.action_dim - 1)
         self.position = self.initial_action * self.max_holding_number / (
             self.action_dim - 1)
+        # [TradeMaster] the mask depends on self.position: compute it after the initial position is set
+        # (upstream computed it first, from the previous episode's / __init__'s position)
+        avaliable_discriminator = self.calculate_avaliable_action(
+            price_information)
         self.position_holding_length = 1
         self.needed_money_memory.append(self.position *
-                                        self.data.iloc[-1]["ask1_price"])
+                                        self._book["ask1_price"][self.day - 1])
         self.sell_money_memory.append(0)
 
         return self.state.reshape(-1), {
@@ -180,13 +210,12 @@ class Testing_env(gym.Env):
         normlized_action = action / (self.action_dim - 1)
         position = self.max_holding_number * normlized_action
         # 目前没有future embedding day代表最新一天的信息
-        self.terminal = (self.day >= len(self.df.index.unique()) - 1-self.early_stop)
+        self.terminal = (self.day >= self._n_rows - 1-self.early_stop)
         previous_position = self.previous_position
-        previous_price_information = self.data.iloc[-1]
+        previous_price_information = self._row(self.day - 1)
         self.day += 1
-        self.data = self.df.iloc[self.day - self.stack_length:self.day]
-        current_price_information = self.data.iloc[-1]
-        self.state = self.data[self.tech_indicator_list].values
+        current_price_information = self._row(self.day - 1)
+        self.state = self._features[self.day - self.stack_length:self.day]
         self.previous_position = previous_position
         self.position = position
         if previous_position == position:
@@ -263,10 +292,9 @@ class Testing_env(gym.Env):
         needed_money_memory = np.array(self.needed_money_memory)
         true_money = sell_money_memory - needed_money_memory
         final_balance = np.sum(true_money)
-        balance_list = []
-        for i in range(len(true_money)):
-            balance_list.append(np.sum(true_money[:i + 1]))
-        required_money = -np.min(balance_list)
+        # [TradeMaster] running balance via cumsum (was an O(N^2) loop of prefix sums: ~11 min per
+        # router pass over a 2.4M-second train set)
+        required_money = -np.min(np.cumsum(true_money))
         commission_fee = np.sum(self.comission_fee_history)
         return final_balance / (
             required_money +

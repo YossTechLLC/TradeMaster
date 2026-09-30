@@ -53,7 +53,9 @@ class subagent(nn.Module):
         value = self.value(x)
         advantage = self.advantage(x)
         
-        return value + advantage - advantage.mean()
+        # [TradeMaster] per-sample mean over actions (was advantage.mean() over the whole batch, so a batch of
+        # 512 in update() and a single state in act() got differently shifted Q-values). Identical at batch 1.
+        return value + advantage - advantage.mean(dim=-1, keepdim=True)
 
 
 

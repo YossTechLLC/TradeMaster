@@ -1,0 +1,4 @@
+raw/
+golden/
+# the original BOX benchmark logs are kept (the root .gitignore ignores *.log)
+!logs/*.log
