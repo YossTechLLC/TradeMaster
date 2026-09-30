@@ -1,0 +1,20 @@
+# [TradeMaster] Target venue: Kraken US perpetual futures (theoretical, no live connection).
+name: kraken_us_perp
+kind: perp
+description: Kraken US BTC perpetual future, 0.01 BTC per contract, flat USD fee per contract per side.
+contract_size: 0.01
+fees: {model: per_contract, taker: 0.15, maker: 0.15}
+funding: {interval_hours: 8, rate_per_interval: 0.0001}   # baseline interest; premium +-0.05% clamp not modelled
+max_leverage: 10
+maintenance_margin_rate: 0.05
+liquidation_fee_usd: 10
+allows_short: true
+as_of: "2026-09-30"
+sources:
+  - https://support.kraken.com/articles/us-futures-fees
+  - https://support.kraken.com/articles/contract-specifications
+  - https://bitnomial.com/exchange/docs/market-operations/settlements/digital-asset-perpetual-pricing/
+unverified:
+  - fees.maker (assumed equal to taker)
+  - max_leverage (venue figure unverified for US)
+  - maintenance_margin_rate

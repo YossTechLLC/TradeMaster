@@ -1,0 +1,15 @@
+# [TradeMaster] Spot venue: long-only, no leverage (the current MacroHFT cost setting expressed as a venue).
+name: binance_us_spot
+kind: spot
+description: Binance.US BTC spot, long-only, leverage 1.
+contract_size: 0.00001
+fees: {model: pct, taker: 0.0002, maker: 0.0}
+funding: null
+max_leverage: 1
+maintenance_margin_rate: 0
+liquidation_fee_usd: 0
+allows_short: false
+as_of: "2026-09-30"
+sources:
+  - https://www.binance.us/fees
+unverified: []

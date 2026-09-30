@@ -1,0 +1,8 @@
+# [TradeMaster] Bridge policy: reproduces MacroHFT.trading.accounting.Account exactly (L=5 equity sizing, no checks).
+name: identity_L5
+sizing: identity
+margin_leverage: 5
+exposure_cap: 5
+stop_atr_mult: 0
+slippage_bps: 0
+checks: false

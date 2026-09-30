@@ -18,8 +18,9 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT=${1:-/tmp/macro_profiles}; SEEDS=${2:-"12345 23456 34567"}
 read -r -a TRADING <<<"${TRADING_ARGS:-}"; TAG=${TRADING_TAG:+_$TRADING_TAG}  # [TradeMaster]
 mkdir -p "$OUT"; : > "$OUT/1_decompose.tsv"; : > "$OUT/2_train_low.tsv"; : > "$OUT/3_train_high.tsv"
-for ds in $(cd "$HERE/data" && ls -d *_*_* 2>/dev/null | sort); do
-  [[ -f $HERE/data/$ds/run.env ]] || continue
+# DATASETS="BTCUSDT_1h_xt10 BTCUSDT_1h_upstream_real" limits the plan to those datasets (default: every built one)
+for ds in ${DATASETS:-$(cd "$HERE/data" && ls -d *_*_* 2>/dev/null | sort)}; do
+  [[ -f $HERE/data/$ds/run.env ]] || { echo "skip $ds: no data/$ds/run.env" >&2; continue; }
   EMIT_JOBS=1 DATASET=$ds DEVICE=cpu "$HERE/run.sh" decompose >> "$OUT/1_decompose.tsv"
   EMIT_JOBS=1 DATASET=$ds DEVICE=cpu "$HERE/run.sh" train-low ${TRADING[@]:+-- "${TRADING[@]}"} \
     | sed "s|^\([^\t]*\)|\1$TAG|" >> "$OUT/2_train_low.tsv"  # [TradeMaster]

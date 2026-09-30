@@ -1,0 +1,18 @@
+# [TradeMaster] Alternative venue: Coinbase US perpetual-style futures (figures partly unverified).
+name: coinbase_us_perp
+kind: perp
+description: Coinbase US BTC perpetual-style future, 0.01 BTC per contract, percentage fee with per-contract minimum.
+contract_size: 0.01
+fees: {model: pct, taker: 0.0005, maker: 0.0005, min_per_contract: 0.20}
+funding: {interval_hours: 1, rate_per_interval: 0.00001}
+max_leverage: 10
+maintenance_margin_rate: 0.05
+liquidation_fee_usd: 0
+allows_short: true
+as_of: "2026-09-30"
+sources:
+  - https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/guides/futures
+unverified:
+  - funding (placeholder rate)
+  - maintenance_margin_rate
+  - liquidation_fee_usd
