@@ -5,3 +5,4 @@
 # warmup_bars: history computed before the train start and then dropped (>= the longest feature window)
 15m: {interval: 15m, chunk: 288, context_window: 96, memory_capacity: 288, warmup_bars: 1200}
 1h:  {interval: 1h,  chunk: 168, context_window: 48, memory_capacity: 168, warmup_bars: 1200}
+5m:  {interval: 5m,  chunk: 864, context_window: 288, memory_capacity: 864, warmup_bars: 1200}   # 3 days / 1 day, as 1m upstream scaled

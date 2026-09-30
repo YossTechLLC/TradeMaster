@@ -78,9 +78,9 @@ def test_venue_validation():
 
 def test_leverage_policy():
     assert LEVERAGE_POLICY == (3.0, 10.0)
-    for L in (3.0, 10.0, 12, 1.0, 2.0):
+    for L in (2.99, 10.0, 12, 1.0, 2.0):
         raises(lambda: cfg(leverage=L).validate(), "leverage")
-    for L in (3.01, 5, 9.99):
+    for L in (3.0, 3.01, 5, 9.99):
         cfg(leverage=L).validate()
     cfg(mode="long_only", leverage=4).validate()
     # venue max below policy ceiling

@@ -134,7 +134,7 @@ def test_policy_validation():
     spot = load_venue("binance_us_spot")
     base = dict(name="t", sizing="constant")
     PolicyConfig(**base, margin_leverage=5, exposure_cap=1).validate(KRAKEN)
-    for L in (3.0, 10.0, 2.0, 12.0):
+    for L in (2.99, 10.0, 2.0, 12.0):
         try:
             PolicyConfig(**base, margin_leverage=L, exposure_cap=1).validate(KRAKEN)
         except ValueError:

@@ -11,7 +11,7 @@ import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MACRO = os.path.join(ROOT, "MacroHFT")
-SCRATCH_EXP = "export_tmp"
+SCRATCH_EXP = "export_tmp_seed{}"   # per seed: the seeds of one result key export concurrently
 
 
 def read_run_env(dataset):
@@ -46,7 +46,7 @@ def build_agent(run_dir, dataset):
     key, seed = parse_run(run_dir)
     if key.split("@")[0] != dataset:
         raise ValueError(f"run dir key {key!r} does not belong to dataset {dataset!r}")
-    argv = (["--dataset", dataset, "--device", "cpu", "--seed", str(seed), "--exp", SCRATCH_EXP,
+    argv = (["--dataset", dataset, "--device", "cpu", "--seed", str(seed), "--exp", SCRATCH_EXP.format(seed),
              "--subagent_path", os.path.join("result", "low_level", key, "best_model")]
             + read_run_env(dataset) + trading_flags(run_dir))
     agent = hl.DQN(hl.parser.parse_args(argv))
@@ -100,7 +100,7 @@ def main(argv=None):
     ap.add_argument("--splits", nargs="+", default=["val", "test"])
     a = ap.parse_args(argv)
     run_dir = os.path.abspath(a.run_dir)
-    scratch = os.path.join(os.path.dirname(os.path.dirname(run_dir)), SCRATCH_EXP)
+    scratch = os.path.join(os.path.dirname(os.path.dirname(run_dir)), SCRATCH_EXP.format(parse_run(run_dir)[1]))
     if os.path.exists(scratch):
         raise SystemExit(f"scratch dir {scratch} exists; remove it first")
     try:

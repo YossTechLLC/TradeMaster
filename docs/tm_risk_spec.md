@@ -15,7 +15,7 @@ Status: build contract, 2026-09-30. Plan and rationale: /home/perc/.claude/plans
   - `MacroHFT/trading/venue.py` becomes a re-export shim of `tm_risk.venue`, and its public names stay identical.
 - **Money units.** USD. Equity E. Notional N = |contracts| × contract_size × price.
   - **Exposure** f = N/E.
-  - **Margin leverage** L is the venue account setting: collateral = N/L, with 3 < L < 10 on perps.
+  - **Margin leverage** L is the venue account setting: collateral = N/L, with 3 ≤ L < 10 on perps (3x inclusive on user request).
   - Exposure is capped at `exposure_cap` ≤ L. f and L are different quantities: never multiply by L to get exposure.
 - **Causality.** A decision at the close of bar k uses only data from bars ≤ k.
 
@@ -68,7 +68,7 @@ class Decision:
 class PolicyConfig:   # every field below comes from the yaml; validate() raises ValueError
     name: str
     sizing: str                       # identity | constant | vol_target | kelly
-    margin_leverage: float = 5.0      # perp: 3 < L < 10 (strict), and <= venue.max_leverage; spot: must be 1
+    margin_leverage: float = 5.0      # perp: 3 <= L < 10, and <= venue.max_leverage; spot: must be 1
     exposure_cap: float = 1.0         # f cap, 0 < exposure_cap <= margin_leverage
     constant_exposure: float = 1.0
     target_vol_annual: float = 0.25

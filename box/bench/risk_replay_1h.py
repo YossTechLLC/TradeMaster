@@ -1,4 +1,5 @@
-"""[TradeMaster] Replay all 1h MacroHFT runs under the tm_risk arms (parallel), check identity_L5 against the old logs, print markdown tables."""
+"""[TradeMaster] Replay MacroHFT runs under the tm_risk arms (parallel), check the identity arm against the old logs, print markdown tables.
+Defaults: the 1h runs and the L5 arms; --runs_glob / --arms select others (e.g. the 5m runs with the *_L3 policies)."""
 import argparse, glob, json, os, sys
 from collections import Counter, OrderedDict
 from multiprocessing import Pool
@@ -26,7 +27,7 @@ def job(args):
     out = dict(run_dir=run_dir, arm=arm, summary=res.summary, attribution=attribution(res),
                n_uncovered=res.info["n_uncovered"], truncated=res.info["truncated"])
     old = os.path.join(run_dir, "test", "trading_log.npz")
-    if arm == "identity_L5" and os.path.isfile(old):                     # sanity: replay equity == the original env log
+    if arm.startswith("identity") and os.path.isfile(old):                     # sanity: replay equity == the original env log
         import pandas as pd
         log = np.load(old, allow_pickle=True)
         df = pd.read_feather(os.path.join(DATA, ds, "whole", "test.feather"))
@@ -66,10 +67,10 @@ def tables(items):
                 v = np.array([i["summary"][k] for i in its], dtype=float)
                 cells.append(f"{f.format(v.mean())} ± {f.format(v.std(ddof=1) if len(v) > 1 else 0.0)}")
             lines.append(f"| {arm} | {len(its)} | " + " | ".join(cells) + " |")
-    lines += ["", "### Attribution (all 18 runs pooled, entries and abstentions of sized proposals)", "",
+    lines += ["", f"### Attribution (all {len({i['run_dir'] for i in items})} runs pooled, entries and abstentions of sized proposals)", "",
               "| arm | entries | abstains | of which sizing declined (Kelly / no vol) | Kelly abstention rate | permitted/wanted at proposals | binding at entries |",
               "|---|---|---|---|---|---|---|"]
-    for arm in ARMS[1:]:
+    for arm in [a for a in ARMS if not a.startswith("identity")]:
         its = [i for i in items if i["arm"] == arm]
         ent = sum(i["attribution"]["n_entries"] for i in its)
         ab = sum(i["attribution"]["n_abstain"] for i in its)
@@ -80,13 +81,13 @@ def tables(items):
         pw = np.mean([i["attribution"]["permitted_over_wanted"] for i in its])
         lines.append(f"| {arm} | {ent} | {ab} | {ab_s} | {ab_s / max(1, ent + ab):.1%} | {pw:.2f} | "
                      + ", ".join(f"{k} {v}" for k, v in bind.most_common()) + " |")
-    lines += ["", "### Abstain reasons, default_35dd (all runs)", ""]
+    lines += ["", "### Abstain reasons, Kelly arm (all runs)", ""]
     reasons = Counter()
-    for i in (i for i in items if i["arm"] == "default_35dd"):
+    for i in (i for i in items if i["arm"].startswith("default")):
         for k, v in i["attribution"]["abstain_reasons"].items():
             reasons["below one contract" if k.startswith("permitted") else k] += v
     lines += [f"- {k}: {v}" for k, v in reasons.most_common()]
-    lines += ["", "### identity_L5 vs the original test/trading_log equity", "",
+    lines += ["", "### identity arm vs the original test/trading_log equity", "",
               "| run | log rows / bars | max abs equity diff USD | old final | replay final at log end |", "|---|---|---|---|---|"]
     for i in sorted((i for i in items if "old_log" in i), key=lambda i: i["run_dir"]):
         o = i["old_log"]
@@ -102,11 +103,15 @@ def main():
     ap.add_argument("--procs", type=int, default=14)
     ap.add_argument("--json", default=None, help="write raw items here / read them with --load")
     ap.add_argument("--load", default=None)
+    ap.add_argument("--runs_glob", default="MacroHFT/result/high_level/BTCUSDT_1h_*@long_short-*/*/seed_*",
+                    help="run dirs relative to the repo root")
+    ap.add_argument("--arms", default=",".join(ARMS), help="comma-separated tm_risk policy names (identity arm first)")
     a = ap.parse_args()
+    ARMS[:] = a.arms.split(",")
     if a.load:
         items = json.load(open(a.load))
     else:
-        runs = sorted(glob.glob(os.path.join(TM, "MacroHFT/result/high_level/BTCUSDT_1h_*@long_short-*/*/seed_*")))
+        runs = sorted(glob.glob(os.path.join(TM, a.runs_glob)))
         jobs = [(r, arm, a.venue, a.capital) for arm in reversed(ARMS) for r in runs]     # slow kelly jobs first
         with Pool(a.procs) as p:
             items = p.map(job, jobs, chunksize=1)

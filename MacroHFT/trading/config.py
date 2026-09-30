@@ -4,7 +4,7 @@ from typing import Optional
 
 from MacroHFT.trading.venue import Venue, load_venue
 
-LEVERAGE_POLICY = (3.0, 10.0)   # perp leverage must be strictly inside (user policy, 2026-09-30)
+LEVERAGE_POLICY = (3.0, 10.0)   # perp leverage: 3 <= L < 10 (user policy 2026-09-30; 3x made inclusive on user request)
 MODES = ("legacy", "long_only", "long_short")
 
 
@@ -31,8 +31,8 @@ class TradingConfig:
             raise ValueError(f"venue {v.name!r} does not allow shorting; long_short is not available")
         lo, hi = LEVERAGE_POLICY
         if v.kind == "perp":
-            if not lo < self.leverage < hi:
-                raise ValueError(f"leverage {self.leverage:g} violates policy {lo:g} < L < {hi:g}")
+            if not lo <= self.leverage < hi:
+                raise ValueError(f"leverage {self.leverage:g} violates policy {lo:g} <= L < {hi:g}")
             if self.leverage > v.max_leverage:
                 raise ValueError(f"leverage {self.leverage:g} exceeds venue {v.name!r} max {v.max_leverage:g}")
         else:

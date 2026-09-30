@@ -1,0 +1,16 @@
+# [TradeMaster] (3x margin variant, 2026-09-30) vol_target_25: vol_target sizing, L=5, exposure cap 1x, 3 ATR stop, 5 bps slippage, 2%/5% loss budgets, 35% halt over a 90-day peak.
+name: vol_target_25_L3
+sizing: vol_target
+target_vol_annual: 0.25
+margin_leverage: 3
+exposure_cap: 1.0
+stop_atr_mult: 3
+slippage_bps: 5
+trade_loss_budget: 0.02
+aggregate_loss_budget: 0.05
+dd_halt: 0.35
+dd_window_days: 90
+participation: 0.01
+episode_max_bars: 168
+episode_loss_budget: 0.05
+checks: true

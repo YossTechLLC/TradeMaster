@@ -9,7 +9,7 @@ agents select an environment, and every such change is marked `# [TradeMaster]`.
 1. **The legacy path is unchanged, bit for bit.** With no new flags (`--trade_mode legacy`, the default), MacroHFT must
    produce identical results: `box/bench/golden.py run <name> macro` then `compare p6 <name>` must print `IDENTICAL`.
    Legacy env classes (`MacroHFT/env/*.py`), `tools/demonstration.py` and `model/net.py` are **not edited**.
-2. **Leverage policy (user, 2026-09-30):** on perp venues, leverage L must satisfy **3 < L < 10** (strictly above 3x,
+2. **Leverage policy (user, 2026-09-30):** on perp venues, leverage L must satisfy **3 ≤ L < 10** (amended 2026-09-30: 3x inclusive on user request; originally strictly above 3x,
    strictly below 10x). It is validated at config time; invalid values raise `ValueError`. Default L = 5. Spot venues
    require L = 1 and long-only.
 3. **Modular:** venue data in YAML, one responsibility per module, no MacroHFT imports inside `trading/` except

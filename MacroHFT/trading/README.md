@@ -49,7 +49,7 @@ Runs differing only in non-default `--capital` / `--reward_scale` get `-c<capita
 
 ## Leverage policy
 
-On perp venues leverage must satisfy **3 < L < 10**, strictly (user policy, 2026-09-30), and `L <= venue.max_leverage`.
+On perp venues leverage must satisfy **3 ≤ L < 10** (user policy, 2026-09-30; 3x made inclusive on user request), and `L <= venue.max_leverage`.
 Default 5. Anything else raises `ValueError` when the config is built (e.g. `--leverage 3` is rejected). Spot venues
 require L = 1 and `long_only`. Legacy mode ignores all of these fields.
 

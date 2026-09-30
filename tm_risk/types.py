@@ -6,7 +6,7 @@ import yaml
 
 POLICY_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "policies")
 SIZING_ARMS = ("identity", "constant", "vol_target", "kelly")
-LEVERAGE_POLICY = (3.0, 10.0)   # perp margin leverage must be strictly inside (user policy, 2026-09-30)
+LEVERAGE_POLICY = (3.0, 10.0)   # perp margin leverage: 3 <= L < 10 (user policy 2026-09-30; 3x made inclusive on user request)
 
 
 @dataclass
@@ -44,7 +44,7 @@ class Decision:
 class PolicyConfig:
     name: str
     sizing: str                             # identity | constant | vol_target | kelly
-    margin_leverage: float = 5.0            # perp: 3 < L < 10 and <= venue.max_leverage; spot: must be 1
+    margin_leverage: float = 5.0            # perp: 3 <= L < 10 and <= venue.max_leverage; spot: must be 1
     exposure_cap: float = 1.0               # 0 < exposure_cap <= margin_leverage
     constant_exposure: float = 1.0
     target_vol_annual: float = 0.25
@@ -85,8 +85,8 @@ class PolicyConfig:
             if L != 1:
                 raise err(f"spot venue requires margin_leverage 1, got {L:g}")
         else:
-            if not lo < L < hi:
-                raise err(f"margin_leverage {L:g} violates policy {lo:g} < L < {hi:g}")
+            if not lo <= L < hi:
+                raise err(f"margin_leverage {L:g} violates policy {lo:g} <= L < {hi:g}")
             if venue is not None and L > venue.max_leverage:
                 raise err(f"margin_leverage {L:g} exceeds venue {venue.name!r} max {venue.max_leverage:g}")
         if not 0 < self.exposure_cap <= L:
